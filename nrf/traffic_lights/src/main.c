@@ -1,3 +1,9 @@
+/* My goal is to get full grades in Embedded Programming courses, because it will help me
+ * to better understand embedded systems programming and Zephyr RTOS, and possibly
+ * open up career opportunities in embedded systems development in the future. I see
+ * this skill as a valuable asset in the tech industry.
+*/
+
 #include <zephyr/kernel.h>
 
 #include <stdio.h>
@@ -61,7 +67,7 @@ K_THREAD_DEFINE(greenth, STACKSIZE,
                 green, NULL, NULL, NULL,
                 PRIORITY, 0, 0);
 
-// Helper macross and variable to enable an disable interrupts for pause button
+// Helper macros and variable to enable an disable interrupts for pause button
 // and to detect if the interrupts are enabled or disabled
 static bool interrupt_enabled = true;
 
@@ -187,7 +193,7 @@ void green(void *, void *, void *)
 
 void pause_isr(void)
 {
-        // Disable interrupt and toggle state the rest is done by the (enabled in main)
+        // Disable interrupt (re-enabled in main)
         INTERRUPT_DISABLE();
         paused = !paused;
         latest_push = k_uptime_get_32();
@@ -197,7 +203,7 @@ void pause_isr(void)
                 cont = state;
                 state = PAUSE;
                 printf("Pausing\n");
-                // If we are unpausing, restore the saved state
+        // If we are unpausing, restore the saved state
         } else {
                 state = cont;
                 printf("Resuming\n");
