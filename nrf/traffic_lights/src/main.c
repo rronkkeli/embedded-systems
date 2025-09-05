@@ -322,6 +322,11 @@ void red_toggle_isr(void)
         // Only do something if we are paused
         if (paused) {
                 // When toggling from other colours, red initially on
+                if (state == YBLINK) {
+                        state = MANUAL;
+                        printf("Toggling YELLOW BLINK OFF\n");
+                }
+
                 if (green_state) {
                         green_state = false;
                         gpio_pin_set_dt(&green_led, 0);
@@ -344,6 +349,11 @@ void yellow_toggle_isr(void)
         latest_push = k_uptime_get_32();
 
         if (paused) {
+                if (state == YBLINK) {
+                        state = MANUAL;
+                        printf("Toggling YELLOW BLINK OFF\n");
+                }
+
                 if (red_state == green_state) {
                         red_state = !red_state;
                         green_state = !green_state;
@@ -368,6 +378,11 @@ void green_toggle_isr(void)
         latest_push = k_uptime_get_32();
 
         if (paused) {
+                if (state == YBLINK) {
+                        state = MANUAL;
+                        printf("Toggling YELLOW BLINK OFF\n");
+                }
+                
                 if (red_state) {
                         red_state = false;
                         gpio_pin_set_dt(&red_led, 0);
