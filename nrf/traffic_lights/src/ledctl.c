@@ -15,21 +15,26 @@ bool paused = false;
 static const struct gpio_dt_spec red_led = GPIO_DT_SPEC_GET(RED_L, gpios);
 static const struct gpio_dt_spec green_led = GPIO_DT_SPEC_GET(GREEN_L, gpios);
 
-int init_leds(void)
+// Current state variables initialized to red
+enum State state = Red;
+enum State cont = Red;
+enum Color color = LRed;
+
+bool init_leds(void)
 {
         // Check that on-board leds are ready
         if (!gpio_is_ready_dt(&red_led) || !gpio_is_ready_dt(&green_led)) {
                 printf("Error: LED device(s) not ready\n");
-                return 0;
+                return false;
         }
 
         if (gpio_pin_configure_dt(&red_led, GPIO_OUTPUT_ACTIVE) < 0 ||
             gpio_pin_configure_dt(&green_led, GPIO_OUTPUT_ACTIVE) < 0) {
                 printf("Error: Failed to configure LED pins\n");
-                return 0;
+                return false;
         }
 
-        return 1;
+        return true;
 }
 
 void red(enum State *state, enum Color *led_color, bool *paused)

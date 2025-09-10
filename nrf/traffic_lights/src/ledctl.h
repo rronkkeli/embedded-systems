@@ -10,7 +10,12 @@ enum State { Red, Yellow, Green, Yblink, Manual };
 // Holds the state of two leds
 enum Color { LOff, LRed, LGreen, LYellow };
 
-int init_leds(void);
+// Current state variables initialized to red
+extern enum State state;
+extern enum State cont;
+extern enum Color color;
+
+bool init_leds(void);
 
 // Function prototypes for color tasks
 void red(enum State *, enum Color *, bool *);

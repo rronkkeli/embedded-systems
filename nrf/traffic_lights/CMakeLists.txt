@@ -5,3 +5,4 @@ project(traffic_lights)
 
 target_sources(app PRIVATE src/main.c)
 target_sources(app PRIVATE src/ledctl.c)
+target_sources(app PRIVATE src/buttons.c)
