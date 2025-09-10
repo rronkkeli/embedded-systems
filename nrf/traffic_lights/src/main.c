@@ -4,18 +4,12 @@
  * this skill as a valuable asset in the tech industry.
 */
 
-#include <zephyr/kernel.h>
-
 #include <stdio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 
-#include <core_cm33.h>
-// #include <zephyr/sys/printk.h>
+#include "ledctl.h"
 
-// Red and Green are on board leds but yellow needs to be created by combining red and green.
-#define RED DT_ALIAS(led0)
-#define GREEN DT_ALIAS(led1)
 // Manual drive button is button 0
 #define MANUAL DT_ALIAS(sw0)
 // Switch to color or turn current color off on manual drive
@@ -27,12 +21,6 @@
 
 // Prevent noise and constant interruptions from button presses
 #define DEBOUNCE_TIME_MS 200
-
-// Bind to leds and tract their state
-static const struct gpio_dt_spec red_led = GPIO_DT_SPEC_GET(RED, gpios);
-static const struct gpio_dt_spec green_led = GPIO_DT_SPEC_GET(GREEN, gpios);
-bool red_state = true; // Red is on in the beginning
-bool green_state = false;
 
 // Bind manual drive state to button 0 and create a callback structure
 static const struct gpio_dt_spec manual_button = GPIO_DT_SPEC_GET(MANUAL, gpios);
@@ -55,27 +43,13 @@ void yellow_toggle_isr(void);
 void green_toggle_isr(void);
 void yblink_toggle_isr(void);
 
-// Function prototypes for color tasks
-void red(void *, void *, void *);
-void yellow(void *, void *, void *);
-void green(void *, void *, void *);
-void yblink(void *, void *, void *);
-
-// This simplifies the state machine syntax (instead of using integers)
-enum Sate { RED, YELLOW, GREEN, YBLINK, MANUAL } typedef State;
-
-// Current state variables initialized to red
-volatile static State state = RED;
-volatile static State cont = RED;
-
-// Is the state machine paused?
-volatile static bool paused = false;
-
 // Timestamp of the latest button push
 volatile static uint32_t latest_push = 0;
 
-// Set transition time between colors
-#define HOLD_TIME_MS 1000
+// Current state variables initialized to red
+enum State state = Red;
+enum State cont = Red;
+enum Color color = LRed;
 
 // Stack size and priority for task threads
 #define STACKSIZE 512
@@ -83,19 +57,19 @@ volatile static uint32_t latest_push = 0;
 
 // Define tasks for each color
 K_THREAD_DEFINE(redth, STACKSIZE,
-		red, NULL, NULL, NULL,
+		red, &state, &color, &paused,
 		PRIORITY, 0, 0);
 
 K_THREAD_DEFINE(yellowth, STACKSIZE,
-                yellow, NULL, NULL, NULL,
+                yellow, &state, &color, &paused,
                 PRIORITY, 0, 0);
 
 K_THREAD_DEFINE(greenth, STACKSIZE,
-                green, NULL, NULL, NULL,
+                green, &state, &color, &paused,
                 PRIORITY, 0, 0);
 
 K_THREAD_DEFINE(yblinkth, STACKSIZE,
-                yblink, NULL, NULL, NULL,
+                yblink, &state, &color, &paused,
                 PRIORITY, 0, 0);
 
 // Helper functions and variable to enable an disable interrupts for pause button
@@ -106,23 +80,20 @@ void interrupt_disable(void);
 
 int main(void)
 {
-        // Check that on-board leds are ready
-        if (!gpio_is_ready_dt(&red_led) || !gpio_is_ready_dt(&green_led)) {
-                printf("Error: LED device(s) not ready\n");
+        if (!init_leds()) {
                 return 0;
         }
+
         // Check that buttons are ready
         if (!gpio_is_ready_dt(&manual_button) || !gpio_is_ready_dt(&red_toggle) ||
             !gpio_is_ready_dt(&yellow_toggle) || !gpio_is_ready_dt(&green_toggle) ||
             !gpio_is_ready_dt(&yblink_toggle)) {
                 printf("Error: Button device not ready\n");
-                return;
+                return 0;
         }
 
         // Set led pins as output and buttons as input
-	if (gpio_pin_configure_dt(&red_led, GPIO_OUTPUT_ACTIVE) < 0 ||
-            gpio_pin_configure_dt(&green_led, GPIO_OUTPUT_ACTIVE) < 0 ||
-            gpio_pin_configure_dt(&manual_button, GPIO_INPUT | GPIO_PULL_UP) < 0
+	if (gpio_pin_configure_dt(&manual_button, GPIO_INPUT | GPIO_PULL_UP) < 0
             || gpio_pin_configure_dt(&red_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
             || gpio_pin_configure_dt(&yellow_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
             || gpio_pin_configure_dt(&green_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
@@ -164,16 +135,16 @@ int main(void)
                 // The simplest state machine ever
 		switch (state)
                 {
-                case RED:
-                        state = YELLOW;
+                case Red:
+                        state = Yellow;
                         printf("Switching to YELLOW\n");
                         break;
-                case YELLOW:
-                        state = GREEN;
+                case Yellow:
+                        state = Green;
                         printf("Switching to GREEN\n");
                         break;
-                case GREEN:
-                        state = RED;
+                case Green:
+                        state = Red;
                         printf("Switching to RED\n");
                         break;
                 default:
@@ -189,75 +160,6 @@ int main(void)
 	return 0;
 }
 
-void red(void *, void *, void *)
-{
-        // Loop forever
-        while (1) {
-                // Check if we need to turn on red and green off
-                if (state == RED && (!red_state || green_state)) {
-                        red_state = true;
-                        green_state = false;
-                        gpio_pin_set_dt(&red_led, 1);
-                        gpio_pin_set_dt(&green_led, 0);
-                }
-
-                k_yield();
-        }
-}
-
-void yellow(void *, void *, void *)
-{
-        while (1) {
-                if (state == YELLOW && (!red_state || !green_state)) {
-                        red_state = true;
-                        green_state = true;
-                        gpio_pin_set_dt(&red_led, 1);
-                        gpio_pin_set_dt(&green_led, 1);
-                }
-
-                k_yield();
-        }
-}
-
-void green(void *, void *, void *)
-{
-        while (1) {
-                if (state == GREEN && (red_state || !green_state)) {
-                        red_state = false;
-                        green_state = true;
-                        gpio_pin_set_dt(&red_led, 0);
-                        gpio_pin_set_dt(&green_led, 1);
-                }
-
-                k_yield();
-        }
-}
-
-void yblink(void *, void *, void *)
-{
-        int toggled = 0;
-
-        while (1) {
-                if (state == YBLINK && paused && k_uptime_get_32() - HOLD_TIME_MS >= toggled) {
-                        toggled = k_uptime_get_32();
-
-                        // Toggle yellow by toggling red and green
-                        if (red_state == green_state) {
-                                red_state = !red_state;
-                                green_state = !green_state;
-                                gpio_pin_toggle_dt(&red_led);
-                                gpio_pin_toggle_dt(&green_led);
-                        } else {
-                                red_state = true;
-                                green_state = true;
-                                gpio_pin_set_dt(&red_led, 1);
-                                gpio_pin_set_dt(&green_led, 1);
-                        }
-                }
-
-                k_yield();
-        }
-}
 
 void interrupt_enable(void)
 {
@@ -296,7 +198,7 @@ void manual_isr(void)
         // If we are pausing, save the current state and set state to MANUAL
         if (paused) {
                 cont = state;
-                state = MANUAL;
+                state = Manual;
                 // Pause color changing tasks
                 k_thread_suspend(redth);
                 k_thread_suspend(yellowth);
@@ -321,23 +223,20 @@ void red_toggle_isr(void)
 
         // Only do something if we are paused
         if (paused) {
-                // When toggling from other colours, red initially on
-                if (state == YBLINK) {
-                        state = MANUAL;
+                if (state == Yblink) {
+                        state = Manual;
                         printf("Toggling YELLOW BLINK OFF\n");
                 }
 
-                if (green_state) {
-                        green_state = false;
-                        gpio_pin_set_dt(&green_led, 0);
-                        if (!red_state) {
-                                gpio_pin_set_dt(&red_led, 1);
-                                red_state = true;
-                        }
+
+                if (color == LRed) {
+                        color = LOff;
+                        set_off();
                 } else {
-                        red_state = !red_state;
-                        gpio_pin_toggle_dt(&red_led);
+                        color = LRed;
+                        set_red();
                 }
+
                 printf("Toggling RED\n");
         }
 }
@@ -349,23 +248,17 @@ void yellow_toggle_isr(void)
         latest_push = k_uptime_get_32();
 
         if (paused) {
-                if (state == YBLINK) {
-                        state = MANUAL;
+                if (state == Yblink) {
+                        state = Manual;
                         printf("Toggling YELLOW BLINK OFF\n");
                 }
 
-                if (red_state == green_state) {
-                        red_state = !red_state;
-                        green_state = !green_state;
-                        gpio_pin_toggle_dt(&red_led);
-                        gpio_pin_toggle_dt(&green_led);
-                        printf("Toggling YELLOW\n");
+                if (color == LYellow) {
+                        color = LOff;
+                        set_off();
                 } else {
-                        red_state = true;
-                        green_state = true;
-                        gpio_pin_set_dt(&red_led, 1);
-                        gpio_pin_set_dt(&green_led, 1);
-                        printf("Turning YELLOW ON\n");
+                        color = LYellow;
+                        set_yellow();
                 }
         }
 
@@ -378,21 +271,17 @@ void green_toggle_isr(void)
         latest_push = k_uptime_get_32();
 
         if (paused) {
-                if (state == YBLINK) {
-                        state = MANUAL;
+                if (state == Yblink) {
+                        state = Manual;
                         printf("Toggling YELLOW BLINK OFF\n");
                 }
                 
-                if (red_state) {
-                        red_state = false;
-                        gpio_pin_set_dt(&red_led, 0);
-                        if (!green_state) {
-                                gpio_pin_set_dt(&green_led, 1);
-                                green_state = true;
-                        }
+                if (color == LGreen) {
+                        color = LOff;
+                        set_off();
                 } else {
-                        green_state = !green_state;
-                        gpio_pin_toggle_dt(&green_led);
+                        color = LGreen;
+                        set_green();
                 }
 
                 printf("Toggling GREEN\n");
@@ -407,11 +296,11 @@ void yblink_toggle_isr(void)
 
         if (paused) {
                 // Toggle blinking yellow mode
-                if (state != YBLINK) {
-                        state = YBLINK;
+                if (state != Yblink) {
+                        state = Yblink;
                         printf("Toggling YELLOW BLINK ON\n");
                 } else {
-                        state = MANUAL;
+                        state = Manual;
                         printf("Toggling YELLOW BLINK OFF\n");
                 }
         }
