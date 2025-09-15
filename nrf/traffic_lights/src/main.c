@@ -10,16 +10,24 @@
 
 #include "ledctl.h"
 #include "buttons.h"
+#include "dispatcher.h"
 
 int main(void)
 {
         if (!init_leds()) {
                 return 0;
         }
-
+        printk("Initialized leds\n");
+        
         if (!init_buttons()) {
                 return 0;
         }
+        printk("Initialized buttons\n");
+        
+        if (!init_uart()) {
+                return 0;
+        }
+        printk("Initialized uart\n");
 
 	while (1) {
                 // Hold the current state (called here because first state is already declared)
