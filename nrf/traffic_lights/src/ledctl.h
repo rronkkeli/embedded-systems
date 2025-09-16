@@ -15,6 +15,10 @@ extern enum State state;
 extern enum State cont;
 extern enum Color color;
 
+extern const k_tid_t redth;
+extern const k_tid_t yellowth;
+extern const k_tid_t greenth;
+
 bool init_leds(void);
 
 // Function prototypes for color tasks

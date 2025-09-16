@@ -7,6 +7,7 @@
 
 #include "ledctl.h"
 #include "dispatcher.h"
+#include "mux.h"
 
 #define STACK_SIZE 512
 #define PRIORITY 5
@@ -49,8 +50,8 @@ void push_ht(uint16_t *ht_dat, uint16_t *ht, int *offset, int *len, bool *pd) {
     // Update each corresponding hold time of the sequence
     while (*len > 0) {
         ht_dat[*offset] = *ht;
-        *offset++; // One command handled -> increment the offset
-        *len--; // ..and decrement length
+        *offset += 1;; // One command handled -> increment the offset
+        *len += 1; // ..and decrement length
     }
 
     *ht = 0;
@@ -72,7 +73,7 @@ void uart_task(void *, void *, void *) {
     // Initialize `command` and `single_command` with zeros
     memset(command_buf, 0, COMSIZ);
     // Default to one second
-    memset(ht_buf, 1000, COMSIZ);
+    memset(ht_buf, 1000, sizeof(ht_buf));
 
     // Infinitely wait for data to be read from UART
     while (true) {
@@ -100,7 +101,7 @@ void uart_task(void *, void *, void *) {
 
             // Parse newline aka command end
             else if (rechar == '\n' || cnt + seqnt == 20) {
-                push_ht(&ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
+                push_ht(ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
 
                 printk("Received: %s\n", command_buf);
                 // Allocate memory for fifo use
@@ -122,7 +123,7 @@ void uart_task(void *, void *, void *) {
                 parsing_digits = false;
                 seq_time_buf = 0;
                 memset(command_buf, 0, COMSIZ);
-                memset(ht_buf, 1000, COMSIZ);
+                memset(ht_buf, 1000, sizeof(ht_buf));
             }
             
             // Parse digits
@@ -138,7 +139,7 @@ void uart_task(void *, void *, void *) {
                 if (rechar == 'R' || rechar == 'Y' || rechar == 'G' || rechar == 'O') {
                     // Write previous sequence time info if present
                     if (parsing_digits) {
-                        push_ht(&ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
+                        push_ht(ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
                     }
 
                     seqnt++; // Increment sequence counter
@@ -156,7 +157,7 @@ void uart_task(void *, void *, void *) {
                     parsing_digits = false;
                     seq_time_buf = 0;
                     memset(command_buf, 0, COMSIZ);
-                    memset(ht_buf, 1000, COMSIZ);
+                    memset(ht_buf, 1000, sizeof(ht_buf));
                 }
             }
         }
@@ -166,8 +167,6 @@ void uart_task(void *, void *, void *) {
 }
                 
 void dispatcher_task(void *, void *, void *) {
-    // Used when updated from required step 1
-    
     while (true) {
         printk("Waiting for fifo data\n");
         struct fifo_data_t *rec_data = k_fifo_get(&dispatcher_fifo, K_FOREVER);
@@ -175,27 +174,37 @@ void dispatcher_task(void *, void *, void *) {
 
         // Iterate over each command (end with ecountering 0)
         for (int i = 0; i < rec_data->ledctl.seq_len; i++) {
+            struct holdtime_t *ht = k_malloc(sizeof(struct holdtime_t));
+            memcpy(&ht->time, &rec_data->ledctl.hold_times[i], 4);
+            k_fifo_put(&ht_fifo, ht);
+            struct k_condvar *release = NULL;
+            struct k_mutex *lock = NULL;
+
             switch (rec_data->ledctl.colors[i]) {
                 case 'R':
-                    set_red();
+                    release = &rsig;
+                    lock = &rmux;
                     printk("Switched led to Red\n");
                     break;
                 case 'Y':
-                    set_yellow();
+                    release = &ysig;
+                    lock = &ymux;
                     printk("Switched led to Yellow\n");
                     break;
                 case 'G':
-                    set_green();
+                    release = &gsig;
+                    lock = &gmux;
                     printk("Switched led to Green\n");
                     break;
                 default:
                     set_off();
                     printk("Switched led to Off\n");
+                    k_msleep(ht->time);
+                    k_free(ht);
                     break;
             }
 
-            // Hold the led on for at least a predefined hold time
-            k_msleep(500);
+            if (release != NULL) k_condvar_wait(release, lock, K_FOREVER);
         }
 
         k_free(rec_data);

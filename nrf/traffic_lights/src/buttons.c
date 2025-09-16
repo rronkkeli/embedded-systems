@@ -36,55 +36,36 @@ static struct gpio_callback yblink_cb_data;
 
 static bool interrupt_enabled = true;
 
-// Stack size and priority for task threads
-#define STACKSIZE 512
-#define PRIORITY 5
 
-// Define tasks for each color
-K_THREAD_DEFINE(redth, STACKSIZE,
-		red, &state, &color, &paused,
-		PRIORITY, 0, 0);
-
-K_THREAD_DEFINE(yellowth, STACKSIZE,
-                yellow, &state, &color, &paused,
-                PRIORITY, 0, 0);
-
-K_THREAD_DEFINE(greenth, STACKSIZE,
-                green, &state, &color, &paused,
-                PRIORITY, 0, 0);
-
-K_THREAD_DEFINE(yblinkth, STACKSIZE,
-                yblink, &state, &color, &paused,
-                PRIORITY, 0, 0);
 
 bool init_buttons(void)
 {
     // Check that buttons are ready
     if (!gpio_is_ready_dt(&manual_button) || !gpio_is_ready_dt(&red_toggle) ||
-        !gpio_is_ready_dt(&yellow_toggle) || !gpio_is_ready_dt(&green_toggle) ||
-        !gpio_is_ready_dt(&yblink_toggle)) {
-            printf("Error: Button device not ready\n");
-            return false;
+    !gpio_is_ready_dt(&yellow_toggle) || !gpio_is_ready_dt(&green_toggle) ||
+    !gpio_is_ready_dt(&yblink_toggle)) {
+        printf("Error: Button device not ready\n");
+        return false;
     }
 
-        // Set led pins as output and buttons as input
+    // Set led pins as output and buttons as input
 	if (gpio_pin_configure_dt(&manual_button, GPIO_INPUT | GPIO_PULL_UP) < 0
-            || gpio_pin_configure_dt(&red_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
-            || gpio_pin_configure_dt(&yellow_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
-            || gpio_pin_configure_dt(&green_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
-            || gpio_pin_configure_dt(&yblink_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0) {
-                printf("Error: Failed to configure IO\n");
+        || gpio_pin_configure_dt(&red_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
+        || gpio_pin_configure_dt(&yellow_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
+        || gpio_pin_configure_dt(&green_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
+        || gpio_pin_configure_dt(&yblink_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0) {
+        printf("Error: Failed to configure IO\n");
 		return false;
 	}
 
     // Finally configure the button to interrupt and..
     if (gpio_pin_interrupt_configure_dt(&manual_button, GPIO_INT_EDGE_TO_INACTIVE) < 0 ||
-        gpio_pin_interrupt_configure_dt(&red_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0 ||
-        gpio_pin_interrupt_configure_dt(&yellow_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0 ||
-        gpio_pin_interrupt_configure_dt(&green_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0 ||
-        gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0) {
-            printf("Error: Failed to configure button interrupt\n");
-            return false;
+    gpio_pin_interrupt_configure_dt(&red_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0 ||
+    gpio_pin_interrupt_configure_dt(&yellow_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0 ||
+    gpio_pin_interrupt_configure_dt(&green_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0 ||
+    gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0) {
+        printf("Error: Failed to configure button interrupt\n");
+        return false;
     }
 
     // ..add the interrupt handlers
@@ -95,12 +76,12 @@ bool init_buttons(void)
     gpio_init_callback(&yblink_cb_data, yblink_toggle_isr, BIT(yblink_toggle.pin));
 
     if (gpio_add_callback(manual_button.port, &manual_cb_data) < 0 ||
-        gpio_add_callback(red_toggle.port, &red_cb_data) < 0 || 
-        gpio_add_callback(yellow_toggle.port, &yellow_cb_data) < 0 ||
-        gpio_add_callback(green_toggle.port, &green_cb_data) < 0 ||
-        gpio_add_callback(yblink_toggle.port, &yblink_cb_data) < 0) {
-            printf("Error: Failed to add button callback(s)\n");
-            return false;
+    gpio_add_callback(red_toggle.port, &red_cb_data) < 0 || 
+    gpio_add_callback(yellow_toggle.port, &yellow_cb_data) < 0 ||
+    gpio_add_callback(green_toggle.port, &green_cb_data) < 0 ||
+    gpio_add_callback(yblink_toggle.port, &yblink_cb_data) < 0) {
+        printf("Error: Failed to add button callback(s)\n");
+        return false;
     }
 
     return true;
@@ -108,147 +89,147 @@ bool init_buttons(void)
 
 void interrupt_enable(void)
 {
-        if (!interrupt_enabled && latest_push + DEBOUNCE_TIME_MS < k_uptime_get_32())
-        {
-                interrupt_enabled = true;
-                gpio_pin_interrupt_configure_dt(&manual_button, GPIO_INT_EDGE_TO_ACTIVE);
+    if (!interrupt_enabled && latest_push + DEBOUNCE_TIME_MS < k_uptime_get_32())
+    {
+        interrupt_enabled = true;
+        gpio_pin_interrupt_configure_dt(&manual_button, GPIO_INT_EDGE_TO_ACTIVE);
 
-                if (paused) {
-                        // If we are in manual mode, we need to reconfigure the toggles
-                        gpio_pin_interrupt_configure_dt(&red_toggle, GPIO_INT_EDGE_TO_ACTIVE);
-                        gpio_pin_interrupt_configure_dt(&yellow_toggle, GPIO_INT_EDGE_TO_ACTIVE);
-                        gpio_pin_interrupt_configure_dt(&green_toggle, GPIO_INT_EDGE_TO_ACTIVE);
-                        gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_EDGE_TO_ACTIVE);
-                }
+        if (paused) {
+            // If we are in manual mode, we need to reconfigure the toggles
+            gpio_pin_interrupt_configure_dt(&red_toggle, GPIO_INT_EDGE_TO_ACTIVE);
+            gpio_pin_interrupt_configure_dt(&yellow_toggle, GPIO_INT_EDGE_TO_ACTIVE);
+            gpio_pin_interrupt_configure_dt(&green_toggle, GPIO_INT_EDGE_TO_ACTIVE);
+            gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_EDGE_TO_ACTIVE);
         }
+    }
 }
 
 void interrupt_disable(void)
 {
-        interrupt_enabled = false;
-        gpio_pin_interrupt_configure_dt(&manual_button, GPIO_INT_DISABLE);
-        gpio_pin_interrupt_configure_dt(&red_toggle, GPIO_INT_DISABLE);
-        gpio_pin_interrupt_configure_dt(&yellow_toggle, GPIO_INT_DISABLE);
-        gpio_pin_interrupt_configure_dt(&green_toggle, GPIO_INT_DISABLE);
-        gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_DISABLE);
+    interrupt_enabled = false;
+    gpio_pin_interrupt_configure_dt(&manual_button, GPIO_INT_DISABLE);
+    gpio_pin_interrupt_configure_dt(&red_toggle, GPIO_INT_DISABLE);
+    gpio_pin_interrupt_configure_dt(&yellow_toggle, GPIO_INT_DISABLE);
+    gpio_pin_interrupt_configure_dt(&green_toggle, GPIO_INT_DISABLE);
+    gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_DISABLE);
 }
 
 void manual_isr(void)
 {
-        // Disable interrupt (re-enabled in main)
-        interrupt_disable();
-        paused = !paused;
-        latest_push = k_uptime_get_32();
+    // Disable interrupt (re-enabled in main)
+    interrupt_disable();
+    paused = !paused;
+    latest_push = k_uptime_get_32();
 
-        // If we are pausing, save the current state and set state to MANUAL
-        if (paused) {
-                cont = state;
-                state = Manual;
-                // Pause color changing tasks
-                k_thread_suspend(redth);
-                k_thread_suspend(yellowth);
-                k_thread_suspend(greenth);
-                printf("Manual control\n");
-        // If we are unpausing, restore the saved state
-        } else {
-                state = cont;
-                // Resume color changing tasks
-                k_thread_resume(redth);
-                k_thread_resume(yellowth);
-                k_thread_resume(greenth);
-                printf("Automatic\n");
-        }
+    // If we are pausing, save the current state and set state to MANUAL
+    if (paused) {
+        cont = state;
+        state = Manual;
+        // Pause color changing tasks
+        k_thread_suspend(redth);
+        k_thread_suspend(yellowth);
+        k_thread_suspend(greenth);
+        printf("Manual control\n");
+    // If we are unpausing, restore the saved state
+    } else {
+        state = cont;
+        // Resume color changing tasks
+        k_thread_resume(redth);
+        k_thread_resume(yellowth);
+        k_thread_resume(greenth);
+        printf("Automatic\n");
+    }
 }
 
 void red_toggle_isr(void)
 {
-        // Disable interrupt (re-enabled in main)
-        interrupt_disable();
-        latest_push = k_uptime_get_32();
+    // Disable interrupt (re-enabled in main)
+    interrupt_disable();
+    latest_push = k_uptime_get_32();
 
-        // Only do something if we are paused
-        if (paused) {
-                if (state == Yblink) {
-                        state = Manual;
-                        printf("Toggling YELLOW BLINK OFF\n");
-                }
-
-
-                if (color == LRed) {
-                        color = LOff;
-                        set_off();
-                } else {
-                        color = LRed;
-                        set_red();
-                }
-
-                printf("Toggling RED\n");
+    // Only do something if we are paused
+    if (paused) {
+        if (state == Yblink) {
+            state = Manual;
+            printf("Toggling YELLOW BLINK OFF\n");
         }
+
+
+        if (color == LRed) {
+            color = LOff;
+            set_off();
+        } else {
+            color = LRed;
+            set_red();
+        }
+
+        printf("Toggling RED\n");
+    }
 }
 
 void yellow_toggle_isr(void)
 {
-        // Disable interrupt (re-enabled in main)
-        interrupt_disable();
-        latest_push = k_uptime_get_32();
+    // Disable interrupt (re-enabled in main)
+    interrupt_disable();
+    latest_push = k_uptime_get_32();
 
-        if (paused) {
-                if (state == Yblink) {
-                        state = Manual;
-                        printf("Toggling YELLOW BLINK OFF\n");
-                }
-
-                if (color == LYellow) {
-                        color = LOff;
-                        set_off();
-                } else {
-                        color = LYellow;
-                        set_yellow();
-                }
-
-                printf("Toggling YELLOW\n");
+    if (paused) {
+        if (state == Yblink) {
+            state = Manual;
+            printf("Toggling YELLOW BLINK OFF\n");
         }
+
+        if (color == LYellow) {
+            color = LOff;
+            set_off();
+        } else {
+            color = LYellow;
+            set_yellow();
+        }
+
+        printf("Toggling YELLOW\n");
+    }
 
 }
 
 void green_toggle_isr(void)
 {
-        // Disable interrupt (re-enabled in main)
-        interrupt_disable();
-        latest_push = k_uptime_get_32();
+    // Disable interrupt (re-enabled in main)
+    interrupt_disable();
+    latest_push = k_uptime_get_32();
 
-        if (paused) {
-                if (state == Yblink) {
-                        state = Manual;
-                        printf("Toggling YELLOW BLINK OFF\n");
-                }
-                
-                if (color == LGreen) {
-                        color = LOff;
-                        set_off();
-                } else {
-                        color = LGreen;
-                        set_green();
-                }
-
-                printf("Toggling GREEN\n");
+    if (paused) {
+        if (state == Yblink) {
+            state = Manual;
+            printf("Toggling YELLOW BLINK OFF\n");
         }
+        
+        if (color == LGreen) {
+            color = LOff;
+            set_off();
+        } else {
+            color = LGreen;
+            set_green();
+        }
+
+        printf("Toggling GREEN\n");
+    }
 }
 
 void yblink_toggle_isr(void)
 {
-        // Disable interrupt (re-enabled in main)
-        interrupt_disable();
-        latest_push = k_uptime_get_32();
+    // Disable interrupt (re-enabled in main)
+    interrupt_disable();
+    latest_push = k_uptime_get_32();
 
-        if (paused) {
-                // Toggle blinking yellow mode
-                if (state != Yblink) {
-                        state = Yblink;
-                        printf("Toggling YELLOW BLINK ON\n");
-                } else {
-                        state = Manual;
-                        printf("Toggling YELLOW BLINK OFF\n");
-                }
+    if (paused) {
+        // Toggle blinking yellow mode
+        if (state != Yblink) {
+            state = Yblink;
+            printf("Toggling YELLOW BLINK ON\n");
+        } else {
+            state = Manual;
+            printf("Toggling YELLOW BLINK OFF\n");
         }
+    }
 }
