@@ -20,10 +20,20 @@ K_FIFO_DEFINE(dispatcher_fifo);
 K_THREAD_DEFINE(uartth, STACK_SIZE, uart_task, NULL, NULL, NULL, PRIORITY, 0, 0);
 K_THREAD_DEFINE(dispatchth, STACK_SIZE, dispatcher_task, NULL, NULL, NULL, PRIORITY-1, 0, 0);
 
-struct fifo_data {
+// Prints the information about usage to the UART shell in command line style
+void print_help(void) {
+    printk("Usage:\n\t[[R | Y | G | O]..INT]..\tSwitch light in given sequence\n\n");
+};
+
+struct led_control_t {
+    int seq_len;
+    char colors[COMSIZ];
+    uint16_t hold_times[COMSIZ];
+};
+
+struct fifo_data_t {
     void *fifo_reserved;
-    char command[COMSIZ];
-    int len;
+    struct led_control_t ledctl;
 };
 
 bool init_uart(void) {
@@ -34,102 +44,138 @@ bool init_uart(void) {
     return false;
 }
 
+// Helper function to push hold time buffer contents to hold time data array
+void push_ht(uint16_t *ht_dat, uint16_t *ht, int *offset, int *len, bool *pd) {
+    // Update each corresponding hold time of the sequence
+    while (*len > 0) {
+        ht_dat[*offset] = *ht;
+        *offset++; // One command handled -> increment the offset
+        *len--; // ..and decrement length
+    }
+
+    *ht = 0;
+    *pd = false;
+}
+
 void uart_task(void *, void *, void *) {
     printk("Started uart task\n");
     // Holds the received single character
     char rechar = 0;
-    // Holds the count of received characters from UART and also is the index
-    int mix = 0;
-    // Used to pass the commands to dispatcher
-    char command[COMSIZ];
+    // Holds the count of received characters from UART and also is the index and seqnt counts the commands in sequence
+    int cnt, seqnt = 0;
+    bool parsing_digits = false;
+    // Used to pass the commands and hold times to dispatcher
+    char command_buf[COMSIZ];
+    uint16_t ht_buf[COMSIZ];
+    // Buffer the sequence's hold_time
+    uint16_t seq_time_buf = 0;
     // Initialize `command` and `single_command` with zeros
-    memset(command, 0, COMSIZ);
-
-    enum State prev_state = state;
-    enum Color prev_color = color;
+    memset(command_buf, 0, COMSIZ);
+    // Default to one second
+    memset(ht_buf, 1000, COMSIZ);
 
     // Infinitely wait for data to be read from UART
     while (true) {
-        // printk("Anna mulle jottaiii ;) ");
         // Received a character through UART -> handle it
         if (uart_poll_in(uart_dev, &rechar) == 0) {
-            // The message can have letters R, Y, G, O and optional time as an integer for milliseconds.
+            // To add more complexity for me, the message can have letters R, Y, G, O and optional time as an integer for milliseconds.
             // It may contain a sequence of colors and end with the time indicator, in which case the given time is
             // used for every color. If the time setting is given, it is applied to colors preceding it.
             //
             // Example:
             // `RYG500R200G500Y1000O` Changes colors Red, Yellow and Green in sequence, holding each on for 500ms.
             // Then it holds Red for 200ms, Green for 500ms, Yellow for 1s and finally turns leds off.
-
+            //
+            // I explicitly wanted to keep the state machine so the automatic mode could be used.
+            
             printk("%c", rechar);
+            if (!paused) paused = true;
             state = Manual;
+            
+            // Switch case would've been long long long so used if else instead.
+            // Skip this loop cycle if carriage return is received.
+            if (rechar == '\r') {
+                continue;
+            }
 
-            // End reading and empty UART buffer if newline is received. Signal the dispatcher it can process the command.
-            if (rechar == '\n' || rechar == '\r') {
-                printk("Received: %s\n", command);
+            // Parse newline aka command end
+            else if (rechar == '\n' || cnt + seqnt == 20) {
+                push_ht(&ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
+
+                printk("Received: %s\n", command_buf);
                 // Allocate memory for fifo use
-                struct fifo_data *data = k_malloc(sizeof(struct fifo_data));
-
+                struct fifo_data_t *data = k_malloc(sizeof(struct fifo_data_t));
+                
                 if (data == NULL) {
                     printk("Memory allocation error.\n");
                     return;
                 }
-
-                memcpy(data->command, command, COMSIZ);
-                memcpy(&data->len, &mix, 4);
+                
+                memcpy(data->ledctl.colors, command_buf, COMSIZ);
+                memcpy(&data->ledctl.seq_len, &cnt, 4);
+                memcpy(data->ledctl.hold_times, ht_buf, COMSIZ);
                 printk("Passing data to dispatcher..\n");
                 k_fifo_put(&dispatcher_fifo, data);
                 rechar = 0;
-                mix = 0;
-                memset(command, 0, COMSIZ);
+                cnt = 0;
+                seqnt = 0;
+                parsing_digits = false;
+                seq_time_buf = 0;
+                memset(command_buf, 0, COMSIZ);
+                memset(ht_buf, 1000, COMSIZ);
             }
-            // Otherwise keep reading
+            
+            // Parse digits
+            else if (rechar > 47 && rechar < 58) {
+                if (!parsing_digits) parsing_digits = true;
+                // Convert to binary integer
+                seq_time_buf = seq_time_buf * 10 + (rechar - 48);
+            }
+            
+            // Parse other characters
             else {
-                if (mix < COMSIZ-1) {
-                    command[mix] = rechar;
-                    mix++;
-                } else {
-                    printk("Received: %s\n", command);
-                    // Dispatch sequence and clear message buffer, printing an error to UART console
-                    printk("Command is over 20 bytes! Give shorter command to get what you expect. Sequence truncated to 20 bytes.\n");
-                    // Allocate memory for fifo use
-                    struct fifo_data *data = k_malloc(sizeof(struct fifo_data));
-
-                    if (data == NULL) {
-                        printk("Memory allocation failed.\n");
-                        return;
+                // Commands
+                if (rechar == 'R' || rechar == 'Y' || rechar == 'G' || rechar == 'O') {
+                    // Write previous sequence time info if present
+                    if (parsing_digits) {
+                        push_ht(&ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
                     }
 
-                    memcpy(data->command, command, COMSIZ);
-                    memcpy(&data->len, &mix, 4);
-                    printk("Passing data to dispatcher..\n");
-                    k_fifo_put(&dispatcher_fifo, data);
+                    seqnt++; // Increment sequence counter
+                    command_buf[cnt + seqnt] = rechar;
+                }
+                
+                // If no comprehensible command was given or the command was erroneous, print help
+                else {
+                    print_help();
+                    char discard;
+                    while (uart_poll_in(uart_dev, &discard) != -1);
                     rechar = 0;
-                    mix = 0;
-                    memset(command, 0, COMSIZ);
+                    cnt = 0;
+                    seqnt = 0;
+                    parsing_digits = false;
+                    seq_time_buf = 0;
+                    memset(command_buf, 0, COMSIZ);
+                    memset(ht_buf, 1000, COMSIZ);
                 }
             }
         }
 
-        k_yield();
+        k_msleep(50);
     }
 }
-
+                
 void dispatcher_task(void *, void *, void *) {
     // Used when updated from required step 1
-    //uint32_t hold_times[COMSIZ] = 0;
-
+    
     while (true) {
         printk("Waiting for fifo data\n");
-        struct fifo_data *rec_data = k_fifo_get(&dispatcher_fifo, K_FOREVER);
-        printk("Working on data: %s with length: %d\n", rec_data->command, rec_data->len);
-
-        char commands[COMSIZ];
-        memcpy(commands, rec_data->command, COMSIZ);
+        struct fifo_data_t *rec_data = k_fifo_get(&dispatcher_fifo, K_FOREVER);
+        printk("Working on data with length: %d\n", rec_data->ledctl.seq_len);
 
         // Iterate over each command (end with ecountering 0)
-        for (int i = 0; i < rec_data->len; i++) {
-            switch (commands[i]) {
+        for (int i = 0; i < rec_data->ledctl.seq_len; i++) {
+            switch (rec_data->ledctl.colors[i]) {
                 case 'R':
                     set_red();
                     printk("Switched led to Red\n");
