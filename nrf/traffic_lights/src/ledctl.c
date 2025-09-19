@@ -22,12 +22,17 @@ enum State state = Red;
 enum State cont = Red;
 enum Color color = LRed;
 
+volatile bool red_ignore = false;
+volatile bool yellow_ignore = false;
+volatile bool green_ignore = false;
+
 // Stack size and priority for task threads
 #define STACKSIZE 512
 #define PRIORITY 5
 
-// TODO: Convert these into a one single thread that switches leds depending on what user wants.
-// No need to repeat ourselves.
+// TODO: Led tasks should wait for a signal `xsig` locked with led mutex `lmux` and release the lock by giving signal
+// to next color or to dispatcher, depending on if mode is automatic or manual. On automatic mode, each task calls the next:
+// Red -> Yellow -> Green -> Red.. and on manual mode each task sends a release signal for dispatcher.
 // Define tasks for each color
 K_THREAD_DEFINE(redth, STACKSIZE,
 		red, &state, &color, &paused,
@@ -44,8 +49,6 @@ K_THREAD_DEFINE(greenth, STACKSIZE,
 K_THREAD_DEFINE(yblinkth, STACKSIZE,
         yblink, &state, &color, &paused,
         PRIORITY, 0, 0);
-
-
 
 bool init_leds(void)
 {
@@ -69,35 +72,50 @@ void red(enum State *state, enum Color *led_color, bool *paused)
     int random;
     // Loop forever
     while (1) {
-    // Check if we need to turn on red and green off
-    if (*state == Red && *led_color != LRed) {
-        *led_color = LRed;
-        gpio_pin_set_dt(&red_led, 1);
-        gpio_pin_set_dt(&green_led, 0);
+        printk("State = %d, Color = %d, paused = %d\n", *state, *led_color, *paused);
+        // Check if we need to turn on red and green off
+        if (*state == Red && *led_color != LRed) {
+            *led_color = LRed;
+            gpio_pin_set_dt(&red_led, 1);
+            gpio_pin_set_dt(&green_led, 0);
+            printk("Red is set\n");
 
-    } else if (*state == Manual) {
-        // Check if signal has been given but do not block here in case automatic mode is put on
-        if (k_condvar_wait(&rsig, &rmux, K_NO_WAIT) == 0) {
-        struct holdtime_t *holdtime = k_fifo_get(&ht_fifo, K_NO_WAIT);
-        gpio_pin_set_dt(&red_led, 1);
-        gpio_pin_set_dt(&green_led, 0);
-
-        // Hold the given time if specified or default
-        if (holdtime != NULL) {
-            k_msleep(holdtime->time);
-            k_free(holdtime);
-        } else {
-            k_msleep(HOLD_TIME_MS);
+        } else if (*state == Manual && *paused) {
+            // printk("Manual state detected: Checking condition variable\n");
+            // Block is released when changing back to maual mode
+            if (k_condvar_wait(&rsig, &lmux, K_FOREVER) == 0) {
+                
+                if (!red_ignore) {
+                    struct holdtime_t *holdtime = k_fifo_get(&ht_fifo, K_FOREVER);
+                    gpio_pin_set_dt(&red_led, 1);
+                    gpio_pin_set_dt(&green_led, 0);
+    
+                    // Hold the given time if specified or default
+                    if (holdtime != NULL) {
+                        k_msleep(holdtime->time);
+                    } else {
+                        k_msleep(HOLD_TIME_MS);
+                    }
+                    
+                    gpio_pin_set_dt(&red_led, 0);
+                    *led_color = LOff;
+                    // Release lock
+                    k_condvar_signal(&sig_ok);
+                    printk("Lock released\n");
+                    k_free(holdtime);
+                } else {
+                    printk("Resuming manual control on red\n");
+                    red_ignore = false;
+                }
+            }
         }
 
-        gpio_pin_set_dt(&red_led, 0);
-        }
-    }
-
-    // Get random sleep value between 31 and 255 inclusive. This is to prevent task locks.
-    random = (int)sys_rand32_get();
-    random = (random & 0x000000ff) | 0x0000001f;
-    k_msleep(random);
+        // Get random sleep value between 31 and 255 inclusive. This is to prevent task locks.
+        // random = (int)sys_rand32_get();
+        // random = (random & 0x000000ff) | 0x0000001f;
+        // printk("Sleep time for redth: %d\n", random);
+        // k_msleep(random);
+        k_yield();
     }
 }
 
@@ -105,34 +123,48 @@ void yellow(enum State *state, enum Color *led_color, bool *paused)
 {
     int random;
     while (1) {
-    if (*state == Yellow && *led_color != LYellow) {
-        *led_color = LYellow;
-        gpio_pin_set_dt(&red_led, 1);
-        gpio_pin_set_dt(&green_led, 1);
+        if (*state == Yellow && *led_color != LYellow) {
+            *led_color = LYellow;
+            gpio_pin_set_dt(&red_led, 1);
+            gpio_pin_set_dt(&green_led, 1);
+            printk("Yellow is set\n");
 
-    } else if (*state == Manual) {
-        // Check if signal has been given but do not block here in case automatic mode is put on
-        if (k_condvar_wait(&ysig, &ymux, K_NO_WAIT) == 0) {
-        struct holdtime_t *holdtime = k_fifo_get(&ht_fifo, K_NO_WAIT);
-        gpio_pin_set_dt(&red_led, 1);
-        gpio_pin_set_dt(&green_led, 1);
-
-        // Hold the given time if specified or default
-        if (holdtime != NULL) {
-            k_msleep(holdtime->time);
-            k_free(holdtime);
-        } else {
-            k_msleep(HOLD_TIME_MS);
+        } else if (*state == Manual && *paused) {
+            // printk("Manual state detected: Checking condition variable\n");
+            // Block is released when changing back to maual mode
+            if (k_condvar_wait(&ysig, &lmux, K_FOREVER) == 0) {
+                
+                if (!yellow_ignore) {
+                    struct holdtime_t *holdtime = k_fifo_get(&ht_fifo, K_FOREVER);
+                    gpio_pin_set_dt(&red_led, 1);
+                    gpio_pin_set_dt(&green_led, 1);
+    
+                    // Hold the given time if specified or default
+                    if (holdtime != NULL) {
+                        k_msleep(holdtime->time);
+                    } else {
+                        k_msleep(HOLD_TIME_MS);
+                    }
+                    
+                    gpio_pin_set_dt(&red_led, 0);
+                    gpio_pin_set_dt(&green_led, 0);
+                    *led_color = LOff;
+                    
+                    k_condvar_signal(&sig_ok);
+                    printk("Lock released\n");
+                    k_free(holdtime);
+                } else {
+                    printk("Resuming manual control on yellow\n");
+                    yellow_ignore = false;
+                }
+            }
         }
 
-        gpio_pin_set_dt(&red_led, 0);
-        gpio_pin_set_dt(&green_led, 0);
-        }
-    }
-
-    random = (int)sys_rand32_get();
-    random = (random & 0x000000ff) | 0x0000001f;
-    k_msleep(random);
+        // random = (int)sys_rand32_get();
+        // random = (random & 0x000000ff) | 0x0000001f;
+        // printk("Sleep time for yellowth: %d\n", random);
+        // k_msleep(random);
+        k_yield();
     }
 }
 
@@ -140,34 +172,49 @@ void green(enum State *state, enum Color *led_color, bool *paused)
 {
     int random;
     while (1) {
-    if (*state == Green && *led_color != LGreen) {
-        *led_color = LGreen;
-        gpio_pin_set_dt(&red_led, 0);
-        gpio_pin_set_dt(&green_led, 1);
+        if (*state == Green && *led_color != LGreen) {
+            *led_color = LGreen;
+            gpio_pin_set_dt(&red_led, 0);
+            gpio_pin_set_dt(&green_led, 1);
+            printk("Green is set\n");
 
-    } else if (*state == Manual) {
-        // Check if signal has been given but do not block here in case automatic mode is put on
-        if (k_condvar_wait(&gsig, &gmux, K_NO_WAIT) == 0) {
-        struct holdtime_t *holdtime = k_fifo_get(&ht_fifo, K_NO_WAIT);
-        gpio_pin_set_dt(&red_led, 0);
-        gpio_pin_set_dt(&green_led, 1);
-
-        // Hold the given time if specified or default
-        if (holdtime != NULL) {
-            k_msleep(holdtime->time);
-            k_free(holdtime);
-        } else {
-            k_msleep(HOLD_TIME_MS);
+        } else if (*state == Manual && *paused) {
+            // Block is released when changing back to maual mode
+            if (k_condvar_wait(&gsig, &lmux, K_FOREVER) == 0) {
+                printk("Green signal received in ledctl\n");
+                
+                if (!green_ignore) {
+                    struct holdtime_t *holdtime = k_fifo_get(&ht_fifo, K_FOREVER);
+                    printk("Hold time set %d in green\n", holdtime->time);
+                    gpio_pin_set_dt(&red_led, 0);
+                    gpio_pin_set_dt(&green_led, 1);
+    
+                    // Hold the given time if specified or default
+                    if (holdtime != NULL) {
+                        k_msleep(holdtime->time);
+                    } else {
+                        k_msleep(HOLD_TIME_MS);
+                    }
+                    
+                    gpio_pin_set_dt(&green_led, 0);
+                    *led_color = LOff;
+                    
+                    k_condvar_signal(&sig_ok);
+                    printk("Lock released\n");
+                    k_free(holdtime);
+                } else {
+                    printk("Resuming manual control on green\n");
+                    green_ignore = false;
+                }
+            }
         }
 
-        gpio_pin_set_dt(&green_led, 0);
-        }
-    }
-
-    // Get random sleep value between 31 and 255 inclusive. This is to prevent blocking other threads.
-    random = (int)sys_rand32_get();
-    random = (random & 0x000000ff) | 0x0000001f;
-    k_msleep(random);
+        // Get random sleep value between 31 and 255 inclusive. This is to prevent blocking other threads.
+        // random = (int)sys_rand32_get();
+        // random = (random & 0x000000ff) | 0x0000001f;
+        // printk("Sleep time for greenth: %d\n", random);
+        // k_msleep(random);
+        k_yield();
     }
 }
 
@@ -191,9 +238,10 @@ void yblink(enum State *state, enum Color *led_color, bool *paused)
             }
         }
 
-        random = (int)sys_rand32_get();
-        random = (random & 0x000000ff) | 0x0000001f;
-        k_msleep(random);
+        // random = (int)sys_rand32_get();
+        // random = (random & 0x000000ff) | 0x0000001f;
+        // k_msleep(random);
+        k_msleep(100);
     }
 }
 

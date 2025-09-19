@@ -4,6 +4,7 @@
 
 #include "buttons.h"
 #include "ledctl.h"
+#include "mux.h"
 
 // Manual drive button is button 0
 #define MANUAL DT_ALIAS(sw0)
@@ -36,7 +37,7 @@ static struct gpio_callback yblink_cb_data;
 
 static bool interrupt_enabled = true;
 
-
+static const struct holdtime_t stop_waiting = {.fifo_reserved = &ht_fifo, .time = 0};
 
 bool init_buttons(void)
 {
@@ -102,6 +103,8 @@ void interrupt_enable(void)
             gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_EDGE_TO_ACTIVE);
         }
     }
+
+    // printk("Interrupts enabled\n");
 }
 
 void interrupt_disable(void)
@@ -126,17 +129,22 @@ void manual_isr(void)
         cont = state;
         state = Manual;
         // Pause color changing tasks
-        k_thread_suspend(redth);
-        k_thread_suspend(yellowth);
-        k_thread_suspend(greenth);
+        // k_thread_suspend(redth);
+        // k_thread_suspend(yellowth);
+        // k_thread_suspend(greenth);
         printf("Manual control\n");
     // If we are unpausing, restore the saved state
     } else {
         state = cont;
-        // Resume color changing tasks
-        k_thread_resume(redth);
-        k_thread_resume(yellowth);
-        k_thread_resume(greenth);
+        color = LOff;
+
+        red_ignore = true;
+        yellow_ignore = true;
+        green_ignore = true;
+        k_condvar_signal(&rsig);
+        k_condvar_signal(&ysig);
+        k_condvar_signal(&gsig);
+
         printf("Automatic\n");
     }
 }

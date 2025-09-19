@@ -2,15 +2,14 @@
 
 #include "mux.h"
 
-// Define mutex for every color to be used with signals
-K_MUTEX_DEFINE(rmux);
-K_MUTEX_DEFINE(ymux);
-K_MUTEX_DEFINE(gmux);
+// Define mutex
+K_MUTEX_DEFINE(lmux);
 
 // Define signals for each color
 K_CONDVAR_DEFINE(rsig);
 K_CONDVAR_DEFINE(ysig);
 K_CONDVAR_DEFINE(gsig);
+K_CONDVAR_DEFINE(sig_ok);
 
 // FIFO for hold time
 K_FIFO_DEFINE(ht_fifo);

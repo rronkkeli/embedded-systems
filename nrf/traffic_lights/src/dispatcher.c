@@ -10,7 +10,7 @@
 #include "mux.h"
 
 #define STACK_SIZE 512
-#define PRIORITY 5
+#define PRIORITY 2
 // Define command sequence size once to deflect possible human errors from not remembering to change every occurance
 #define COMSIZ 20
 #define UART_DEVICE DT_CHOSEN(zephyr_shell_uart)
@@ -47,14 +47,21 @@ bool init_uart(void) {
 
 // Helper function to push hold time buffer contents to hold time data array
 void push_ht(uint16_t *ht_dat, uint16_t *ht, int *offset, int *len, bool *pd) {
+    // printk("Called push_ht\n");
     // Update each corresponding hold time of the sequence
+    uint16_t holdfor = *ht;
+
+    // printk("holdfor: %dms\n", holdfor);
+
     while (*len > 0) {
-        ht_dat[*offset] = *ht;
-        *offset += 1;; // One command handled -> increment the offset
-        *len += 1; // ..and decrement length
+        int ix = *offset;
+        // printk("Index of hold times: %d\n", ix);
+        ht_dat[ix] = holdfor;
+        *offset += 1; // One command handled -> increment the offset
+        *len -= 1; // ..and decrement length
     }
 
-    *ht = 0;
+    *ht = 1000;
     *pd = false;
 }
 
@@ -63,20 +70,26 @@ void uart_task(void *, void *, void *) {
     // Holds the received single character
     char rechar = 0;
     // Holds the count of received characters from UART and also is the index and seqnt counts the commands in sequence
-    int cnt, seqnt = 0;
+    int cnt = 0;
+    int seqnt = 0;
     bool parsing_digits = false;
+    bool uart_print = true;
     // Used to pass the commands and hold times to dispatcher
     char command_buf[COMSIZ];
     uint16_t ht_buf[COMSIZ];
     // Buffer the sequence's hold_time
-    uint16_t seq_time_buf = 0;
+    // Default to one second
+    uint16_t seq_time_buf = 1000;
     // Initialize `command` and `single_command` with zeros
     memset(command_buf, 0, COMSIZ);
-    // Default to one second
-    memset(ht_buf, 1000, sizeof(ht_buf));
+    memset(ht_buf, &seq_time_buf, sizeof(ht_buf));
 
     // Infinitely wait for data to be read from UART
     while (true) {
+        if (uart_print) {
+            uart_print = false;
+            printk("Waiting for UART\n");
+        }
         // Received a character through UART -> handle it
         if (uart_poll_in(uart_dev, &rechar) == 0) {
             // To add more complexity for me, the message can have letters R, Y, G, O and optional time as an integer for milliseconds.
@@ -92,18 +105,17 @@ void uart_task(void *, void *, void *) {
             printk("%c", rechar);
             if (!paused) paused = true;
             state = Manual;
-            
-            // Switch case would've been long long long so used if else instead.
-            // Skip this loop cycle if carriage return is received.
+
             if (rechar == '\r') {
-                continue;
+                rechar = '\n';
             }
-
+            
             // Parse newline aka command end
-            else if (rechar == '\n' || cnt + seqnt == 20) {
+            if (rechar == '\n') {
+                printk("\n");
                 push_ht(ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
-
-                printk("Received: %s\n", command_buf);
+                
+                printk("Received: %s\n", &command_buf);
                 // Allocate memory for fifo use
                 struct fifo_data_t *data = k_malloc(sizeof(struct fifo_data_t));
                 
@@ -114,21 +126,25 @@ void uart_task(void *, void *, void *) {
                 
                 memcpy(data->ledctl.colors, command_buf, COMSIZ);
                 memcpy(&data->ledctl.seq_len, &cnt, 4);
-                memcpy(data->ledctl.hold_times, ht_buf, COMSIZ);
-                printk("Passing data to dispatcher..\n");
+                memcpy(data->ledctl.hold_times, ht_buf, sizeof(ht_buf));
+
+                printk("Hold time for index 0 is: %d\n", ht_buf[0]);
+                printk("Passing len %d of data to dispatcher\n", data->ledctl.seq_len);
                 k_fifo_put(&dispatcher_fifo, data);
                 rechar = 0;
                 cnt = 0;
                 seqnt = 0;
-                parsing_digits = false;
-                seq_time_buf = 0;
                 memset(command_buf, 0, COMSIZ);
                 memset(ht_buf, 1000, sizeof(ht_buf));
+                uart_print = true;
             }
             
             // Parse digits
             else if (rechar > 47 && rechar < 58) {
-                if (!parsing_digits) parsing_digits = true;
+                if (!parsing_digits) {
+                    parsing_digits = true;
+                    seq_time_buf = 0;
+                }
                 // Convert to binary integer
                 seq_time_buf = seq_time_buf * 10 + (rechar - 48);
             }
@@ -141,13 +157,14 @@ void uart_task(void *, void *, void *) {
                     if (parsing_digits) {
                         push_ht(ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
                     }
-
+                    
+                    int index = cnt + seqnt;
+                    command_buf[index] = rechar;
                     seqnt++; // Increment sequence counter
-                    command_buf[cnt + seqnt] = rechar;
                 }
                 
                 // If no comprehensible command was given or the command was erroneous, print help
-                else {
+                else if (rechar != '\r') {
                     print_help();
                     char discard;
                     while (uart_poll_in(uart_dev, &discard) != -1);
@@ -175,25 +192,23 @@ void dispatcher_task(void *, void *, void *) {
         // Iterate over each command (end with ecountering 0)
         for (int i = 0; i < rec_data->ledctl.seq_len; i++) {
             struct holdtime_t *ht = k_malloc(sizeof(struct holdtime_t));
-            memcpy(&ht->time, &rec_data->ledctl.hold_times[i], 4);
+            // printk("val: %d\n", rec_data->ledctl.hold_times[i]);
+            memcpy(&ht->time, &rec_data->ledctl.hold_times[i], 2);
+            // printk("ht: %d\n", ht->time);
             k_fifo_put(&ht_fifo, ht);
-            struct k_condvar *release = NULL;
-            struct k_mutex *lock = NULL;
+            struct k_condvar *ledsig = NULL;
 
             switch (rec_data->ledctl.colors[i]) {
                 case 'R':
-                    release = &rsig;
-                    lock = &rmux;
+                    ledsig = &rsig;
                     printk("Switched led to Red\n");
                     break;
                 case 'Y':
-                    release = &ysig;
-                    lock = &ymux;
+                    ledsig = &ysig;
                     printk("Switched led to Yellow\n");
                     break;
                 case 'G':
-                    release = &gsig;
-                    lock = &gmux;
+                    ledsig = &gsig;
                     printk("Switched led to Green\n");
                     break;
                 default:
@@ -201,11 +216,19 @@ void dispatcher_task(void *, void *, void *) {
                     printk("Switched led to Off\n");
                     k_msleep(ht->time);
                     k_free(ht);
+                    ledsig = NULL;
                     break;
             }
 
-            if (release != NULL) k_condvar_wait(release, lock, K_FOREVER);
+            printk("Waiting for lock to release\n");
+            // Wait for the release signal from led task
+            if (ledsig != NULL) {
+                k_condvar_signal(ledsig);
+                k_condvar_wait(&sig_ok, &lmux, K_FOREVER);
+            }
         }
+
+        printk("Dispatcher done\n");
 
         k_free(rec_data);
         k_yield();

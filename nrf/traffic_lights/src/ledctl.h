@@ -19,6 +19,10 @@ extern const k_tid_t redth;
 extern const k_tid_t yellowth;
 extern const k_tid_t greenth;
 
+extern volatile bool red_ignore;
+extern volatile bool yellow_ignore;
+extern volatile bool green_ignore;
+
 bool init_leds(void);
 
 // Function prototypes for color tasks
