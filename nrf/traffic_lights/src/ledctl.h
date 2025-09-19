@@ -25,15 +25,28 @@ extern volatile bool green_ignore;
 
 bool init_leds(void);
 
-// Function prototypes for color tasks
-void red(enum State *, enum Color *, bool *);
-void yellow(enum State *, enum Color *, bool *);
-void green(enum State *, enum Color *, bool *);
-void yblink(enum State *, enum Color *, bool *);
+/*
+    Hold the red led on for a specified time, or hold it for a default time. If ht_fifo time
+    most significant bit is set, led is turned off instead of on.
 
-void set_red(void);
-void set_yellow(void);
-void set_green(void);
-void set_off(void);
+    Hold time, if given in manual mode, determines the minimum time for the led on or off state.
+*/
+void red(enum State *state, void  *, void *);
+
+/*
+    Hold the yellow led on for a specified time, or hold it for a default time. If ht_fifo time
+    most significant bit is set, led is turned off instead of on.
+
+    Hold time, if given in manual mode, determines the minimum time for the led on or off state.
+*/
+void yellow(enum State *state, void  *, void *);
+
+/*
+    Hold the green led on for a specified time, or hold it for a default time. If ht_fifo time
+    most significant bit is set, led is turned off instead of on.
+
+    Hold time, if given in manual mode, determines the minimum time for the led on or off state.
+*/
+void green(enum State *state, void  *, void *);
 
 #endif

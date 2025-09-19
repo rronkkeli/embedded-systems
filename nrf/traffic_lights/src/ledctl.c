@@ -50,6 +50,13 @@ K_THREAD_DEFINE(yblinkth, STACKSIZE,
         yblink, &state, &color, &paused,
         PRIORITY, 0, 0);
 
+// Helper functions for tasks
+void hold(enum State, enum Color);
+void set_red(void);
+void set_yellow(void);
+void set_green(void);
+void set_off(void);
+
 bool init_leds(void)
 {
     // Check that on-board leds are ready
@@ -67,181 +74,83 @@ bool init_leds(void)
     return true;
 }
 
-void red(enum State *state, enum Color *led_color, bool *paused)
+void red(enum State *state, void  *, void *)
 {
-    int random;
     // Loop forever
     while (1) {
-        printk("State = %d, Color = %d, paused = %d\n", *state, *led_color, *paused);
-        // Check if we need to turn on red and green off
-        if (*state == Red && *led_color != LRed) {
-            *led_color = LRed;
-            gpio_pin_set_dt(&red_led, 1);
-            gpio_pin_set_dt(&green_led, 0);
-            printk("Red is set\n");
-
-        } else if (*state == Manual && *paused) {
-            // printk("Manual state detected: Checking condition variable\n");
-            // Block is released when changing back to maual mode
-            if (k_condvar_wait(&rsig, &lmux, K_FOREVER) == 0) {
-                
-                if (!red_ignore) {
-                    struct holdtime_t *holdtime = k_fifo_get(&ht_fifo, K_FOREVER);
-                    gpio_pin_set_dt(&red_led, 1);
-                    gpio_pin_set_dt(&green_led, 0);
-    
-                    // Hold the given time if specified or default
-                    if (holdtime != NULL) {
-                        k_msleep(holdtime->time);
-                    } else {
-                        k_msleep(HOLD_TIME_MS);
-                    }
-                    
-                    gpio_pin_set_dt(&red_led, 0);
-                    *led_color = LOff;
-                    // Release lock
-                    k_condvar_signal(&sig_ok);
-                    printk("Lock released\n");
-                    k_free(holdtime);
-                } else {
-                    printk("Resuming manual control on red\n");
-                    red_ignore = false;
-                }
-            }
+        // Wait for a signal to switch led on and off
+        if (k_condvar_wait(&rsig, &lmux, K_FOREVER) == 0) {
+            hold(*state, LRed);
         }
-
-        // Get random sleep value between 31 and 255 inclusive. This is to prevent task locks.
-        // random = (int)sys_rand32_get();
-        // random = (random & 0x000000ff) | 0x0000001f;
-        // printk("Sleep time for redth: %d\n", random);
-        // k_msleep(random);
-        k_yield();
     }
 }
 
-void yellow(enum State *state, enum Color *led_color, bool *paused)
+void yellow(enum State *state, void  *, void *)
 {
-    int random;
+    // Loop forever
     while (1) {
-        if (*state == Yellow && *led_color != LYellow) {
-            *led_color = LYellow;
-            gpio_pin_set_dt(&red_led, 1);
-            gpio_pin_set_dt(&green_led, 1);
-            printk("Yellow is set\n");
-
-        } else if (*state == Manual && *paused) {
-            // printk("Manual state detected: Checking condition variable\n");
-            // Block is released when changing back to maual mode
-            if (k_condvar_wait(&ysig, &lmux, K_FOREVER) == 0) {
-                
-                if (!yellow_ignore) {
-                    struct holdtime_t *holdtime = k_fifo_get(&ht_fifo, K_FOREVER);
-                    gpio_pin_set_dt(&red_led, 1);
-                    gpio_pin_set_dt(&green_led, 1);
-    
-                    // Hold the given time if specified or default
-                    if (holdtime != NULL) {
-                        k_msleep(holdtime->time);
-                    } else {
-                        k_msleep(HOLD_TIME_MS);
-                    }
-                    
-                    gpio_pin_set_dt(&red_led, 0);
-                    gpio_pin_set_dt(&green_led, 0);
-                    *led_color = LOff;
-                    
-                    k_condvar_signal(&sig_ok);
-                    printk("Lock released\n");
-                    k_free(holdtime);
-                } else {
-                    printk("Resuming manual control on yellow\n");
-                    yellow_ignore = false;
-                }
-            }
+        // Wait for a signal to switch led on and off
+        if (k_condvar_wait(&ysig, &lmux, K_FOREVER) == 0) {
+            hold(*state, LYellow);
         }
-
-        // random = (int)sys_rand32_get();
-        // random = (random & 0x000000ff) | 0x0000001f;
-        // printk("Sleep time for yellowth: %d\n", random);
-        // k_msleep(random);
-        k_yield();
     }
 }
 
-void green(enum State *state, enum Color *led_color, bool *paused)
+void green(enum State *state, void  *, void *)
 {
-    int random;
+    // Loop forever
     while (1) {
-        if (*state == Green && *led_color != LGreen) {
-            *led_color = LGreen;
-            gpio_pin_set_dt(&red_led, 0);
-            gpio_pin_set_dt(&green_led, 1);
-            printk("Green is set\n");
-
-        } else if (*state == Manual && *paused) {
-            // Block is released when changing back to maual mode
-            if (k_condvar_wait(&gsig, &lmux, K_FOREVER) == 0) {
-                printk("Green signal received in ledctl\n");
-                
-                if (!green_ignore) {
-                    struct holdtime_t *holdtime = k_fifo_get(&ht_fifo, K_FOREVER);
-                    printk("Hold time set %d in green\n", holdtime->time);
-                    gpio_pin_set_dt(&red_led, 0);
-                    gpio_pin_set_dt(&green_led, 1);
-    
-                    // Hold the given time if specified or default
-                    if (holdtime != NULL) {
-                        k_msleep(holdtime->time);
-                    } else {
-                        k_msleep(HOLD_TIME_MS);
-                    }
-                    
-                    gpio_pin_set_dt(&green_led, 0);
-                    *led_color = LOff;
-                    
-                    k_condvar_signal(&sig_ok);
-                    printk("Lock released\n");
-                    k_free(holdtime);
-                } else {
-                    printk("Resuming manual control on green\n");
-                    green_ignore = false;
-                }
-            }
+        // Wait for a signal to switch led on and off
+        if (k_condvar_wait(&gsig, &lmux, K_FOREVER) == 0) {
+            hold(*state, LGreen);
         }
-
-        // Get random sleep value between 31 and 255 inclusive. This is to prevent blocking other threads.
-        // random = (int)sys_rand32_get();
-        // random = (random & 0x000000ff) | 0x0000001f;
-        // printk("Sleep time for greenth: %d\n", random);
-        // k_msleep(random);
-        k_yield();
     }
 }
 
-void yblink(enum State *state, enum Color *led_color, bool *paused)
-{
-    uint32_t toggled = 0;
-    int random;
-    while (1) {
-        if (*state == Yblink && *paused && k_uptime_get_32() - HOLD_TIME_MS >= toggled) {
-            toggled = k_uptime_get_32();
+void hold(enum State state, enum Color color) {
+    // Store the color function to be called and the next led signal if not manual mode
+    void (*set_color)(void);
+    struct k_condvar *next_led_signal;
 
-            // Toggle yellow by toggling red and green
-            if (*led_color == LYellow) {
-                *led_color = LOff;
-                gpio_pin_toggle_dt(&red_led);
-                gpio_pin_toggle_dt(&green_led);
+    switch (color) {
+        case LRed:
+            set_color = set_red;
+            next_led_signal = &rsig;
+            break;
+            case LYellow:
+            set_color = set_yellow;
+            next_led_signal = &ysig;
+            break;
+            // Default to green
+            default:
+            set_color = set_green;
+            next_led_signal = &ysig;
+            break;
+    }
+
+    if (state == Manual) {
+        struct holdtime_t *ht = k_fifo_get(&ht_fifo, K_MSEC(HOLD_TIME_MS));
+
+        if  (ht != NULL) {
+            if (ht->time > 0x7fff) {
+                set_off();
+                k_msleep(ht->time & 0x7fff);
             } else {
-                *led_color = LYellow;
-                gpio_pin_set_dt(&red_led, 1);
-                gpio_pin_set_dt(&green_led, 1);
+                set_color();
+                k_msleep(ht->time);
             }
+        } else {
+            set_color();
+            printk("Did not receive fifo data in timeout time\n");
         }
-
-        // random = (int)sys_rand32_get();
-        // random = (random & 0x000000ff) | 0x0000001f;
-        // k_msleep(random);
-        k_msleep(100);
+        
+        k_free(ht);
+        k_condvar_signal(&sig_ok);
+        
+    } else {
+        set_color();
+        k_msleep(HOLD_TIME_MS);
+        k_condvar_signal(next_led_signal);
     }
 }
 
