@@ -5,9 +5,6 @@
 #include "ledctl.h"
 #include "mux.h"
 
-// Mutex for led change function to prevent undefined behaviour. Tasks should wait on this mutex when signal has been received.
-K_MUTEX_DEFINE(toggle_mutex);
-
 // Set transition time between colors
 const uint32_t HOLD_TIME_MS = 1000;
 volatile bool paused = false;
@@ -77,18 +74,10 @@ void red(enum State *state, enum Color *color, void *)
         // Wait for a signal to switch led on and off
         k_mutex_lock(&lmux, K_FOREVER);
         if (k_condvar_wait(&rsig, &lmux, K_FOREVER) == 0) {
-            printk("Got signal\n");
-
-            // Wait for the mutex to unlock
-            printk("Waiting for mutex in red..");
-            k_mutex_lock(&toggle_mutex, K_FOREVER);
-            printk("locked!\n");
             toggle_led(*state, color, Red);
-            k_mutex_unlock(&toggle_mutex);
-            printk("Unlocked.\n");
-
         }
         k_mutex_unlock(&lmux);
+        k_yield();
     }
 }
 
@@ -100,12 +89,6 @@ void yellow(enum State *state, enum Color *color, void *)
         // Wait for a signal to switch led on and off
         k_mutex_lock(&lmux, K_FOREVER);
         if (k_condvar_wait(&ysig, &lmux, K_FOREVER) == 0) {
-            printk("Got signal\n");
-
-            // Wait for the mutex to unlock
-            printk("Waiting for mutex in yellow..");
-            k_mutex_lock(&toggle_mutex, K_FOREVER);
-            printk("locked!\n");
 
             if (*state == Blink) {
                 while (*state == Blink) {
@@ -117,11 +100,9 @@ void yellow(enum State *state, enum Color *color, void *)
             } else {
                 toggle_led(*state, color, Yellow);
             }
-
-            k_mutex_unlock(&toggle_mutex);
-            printk("Unlocked.\n");
         }
         k_mutex_unlock(&lmux);
+        k_yield();
     }
 }
 
@@ -133,17 +114,10 @@ void green(enum State *state, enum Color *color, void *)
         // Wait for a signal to switch led on and off
         k_mutex_lock(&lmux, K_FOREVER);
         if (k_condvar_wait(&gsig, &lmux, K_FOREVER) == 0) {
-            printk("Got signal\n");
-
-            // Wait for the mutex to unlock
-            printk("Waiting for mutex in green..");
-            k_mutex_lock(&toggle_mutex, K_FOREVER);
-            printk("locked!\n");
             toggle_led(*state, color, Green);
-            k_mutex_unlock(&toggle_mutex);
-            printk("Unlocked.\n");
         }
         k_mutex_unlock(&lmux);
+        k_yield();
     }
 }
 
@@ -151,20 +125,19 @@ void toggle_led(enum State state, enum Color *from_color, enum Color to_color) {
     // Store the color function to be called and the next led signal if not manual mode
     void (*set_color)(void);
     struct k_condvar *next_led_signal = NULL;
-    enum Color next_color;
 
     switch (to_color) {
         case Red:
             set_color = &set_red;
-            next_color = Yellow;
+            next_led_signal = &ysig;
             break;
         case Yellow:
             set_color = &set_yellow;
-            next_color = Green;
+            next_led_signal = &gsig;
             break;
         case Green:
             set_color = &set_green;
-            next_color = Red;
+            next_led_signal = &rsig;
             break;
         default:
             set_color = &set_off;
@@ -181,15 +154,16 @@ void toggle_led(enum State state, enum Color *from_color, enum Color to_color) {
             set_color();
             *from_color = to_color;
         }
+
         
-        printk("Sent release\n");
-        k_condvar_signal(&sig_ok);
-    
-    // Blink state is handled in the manual_isr in buttons.c
+        // Blink state is handled in the manual_isr in buttons.c
     } else {
         set_color();
-        *from_color = next_color;
+        k_msleep(HOLD_TIME_MS);
+        k_condvar_signal(next_led_signal);
     }
+
+    k_condvar_signal(&sig_ok);
 }
 
 void set_red(void)

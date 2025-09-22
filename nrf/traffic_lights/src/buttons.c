@@ -18,8 +18,7 @@
 // Prevent noise and constant interruptions from button presses
 #define DEBOUNCE_TIME_MS 200
 
-// Timestamp of the latest button push
-volatile static uint32_t latest_push = 0;
+K_TIMER_DEFINE(button_db, interrupt_enable, NULL);
 
 // Bind manual drive state to button 0 and create a callback structure
 static const struct gpio_dt_spec manual_button = GPIO_DT_SPEC_GET(MANUAL, gpios);
@@ -88,21 +87,18 @@ bool init_buttons(void)
 
 void interrupt_enable(void)
 {
-    if (!interrupt_enabled && latest_push + DEBOUNCE_TIME_MS < k_uptime_get_32())
-    {
-        interrupt_enabled = true;
-        gpio_pin_interrupt_configure_dt(&manual_button, GPIO_INT_EDGE_TO_ACTIVE);
+    interrupt_enabled = true;
+    gpio_pin_interrupt_configure_dt(&manual_button, GPIO_INT_EDGE_TO_ACTIVE);
 
-        if (paused) {
-            // If we are in manual mode, we need to reconfigure the toggles
-            gpio_pin_interrupt_configure_dt(&red_toggle, GPIO_INT_EDGE_TO_ACTIVE);
-            gpio_pin_interrupt_configure_dt(&yellow_toggle, GPIO_INT_EDGE_TO_ACTIVE);
-            gpio_pin_interrupt_configure_dt(&green_toggle, GPIO_INT_EDGE_TO_ACTIVE);
-            gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_EDGE_TO_ACTIVE);
-        }
+    if (paused) {
+        // If we are in manual mode, we need to reconfigure the toggles
+        gpio_pin_interrupt_configure_dt(&red_toggle, GPIO_INT_EDGE_TO_ACTIVE);
+        gpio_pin_interrupt_configure_dt(&yellow_toggle, GPIO_INT_EDGE_TO_ACTIVE);
+        gpio_pin_interrupt_configure_dt(&green_toggle, GPIO_INT_EDGE_TO_ACTIVE);
+        gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_EDGE_TO_ACTIVE);
     }
 
-    // printk("Interrupts enabled\n");
+    printk("Interrupts enabled\n");
 }
 
 void interrupt_disable(void)
@@ -113,14 +109,13 @@ void interrupt_disable(void)
     gpio_pin_interrupt_configure_dt(&yellow_toggle, GPIO_INT_DISABLE);
     gpio_pin_interrupt_configure_dt(&green_toggle, GPIO_INT_DISABLE);
     gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_DISABLE);
+    k_timer_start(&button_db, K_MSEC(DEBOUNCE_TIME_MS), K_NO_WAIT);
 }
 
 void manual_isr(void)
 {
-    // Disable interrupt (re-enabled in main)
     interrupt_disable();
     paused = !paused;
-    latest_push = k_uptime_get_32();
 
     // If we are pausing, save the current state and set state to MANUAL
     if (paused) {
@@ -130,17 +125,32 @@ void manual_isr(void)
         printk("Manual control\n");
     // If we are unpausing, restore the saved state
     } else {
-        state = Auto;
-        color = cont;
-        printk("Automatic: State_%d, Color_%d\n", state, color);
+        if (k_mutex_lock(&lmux, K_NO_WAIT) == 0) {
+            state = Auto;
+            color = cont;
+
+            switch (color) {
+                case Red:
+                    k_condvar_signal(&rsig);
+                    break;
+                case Yellow:
+                    k_condvar_signal(&ysig);
+                    break;
+                default:
+                    k_condvar_signal(&gsig);
+                    break;
+            }
+        } else {
+            printk("Try again. Mutex is busy\n");
+        }
+
+        k_mutex_unlock(&lmux);
     }
 }
 
 void red_toggle_isr(void)
 {
-    // Disable interrupt (re-enabled in main)
     interrupt_disable();
-    latest_push = k_uptime_get_32();
 
     // Only do something if we are paused
     if (paused) {
@@ -157,9 +167,7 @@ void red_toggle_isr(void)
 
 void yellow_toggle_isr(void)
 {
-    // Disable interrupt (re-enabled in main)
     interrupt_disable();
-    latest_push = k_uptime_get_32();
 
     if (paused) {
         if (state == Blink) {
@@ -176,9 +184,7 @@ void yellow_toggle_isr(void)
 
 void green_toggle_isr(void)
 {
-    // Disable interrupt (re-enabled in main)
     interrupt_disable();
-    latest_push = k_uptime_get_32();
 
     if (paused) {
         if (state == Blink) {
@@ -194,9 +200,7 @@ void green_toggle_isr(void)
 
 void yblink_toggle_isr(void)
 {
-    // Disable interrupt (re-enabled in main)
     interrupt_disable();
-    latest_push = k_uptime_get_32();
 
     if (paused) {
         // Toggle blinking yellow mode

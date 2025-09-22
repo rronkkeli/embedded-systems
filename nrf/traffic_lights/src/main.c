@@ -30,44 +30,21 @@ int main(void)
     }
     printk("Initialized uart\n");
 
-    printk("Address of red signal: %x\n", &rsig);
-    printk("Address of yellow signal: %x\n", &ysig);
-    printk("Address of green signal: %x\n", &gsig);
-
     for (int i = 0; i < 3; i++) {
         k_sem_take(&threads_ready, K_FOREVER);
         printk("Sem: %d\n", i);
-        k_yield();
+        k_msleep(100);
     }
 
-    while (1) {
-        // Re-enable interrupts if they were disabled (the function checks)
-        interrupt_enable();
-        if (state == Auto && !paused) {
-            k_mutex_lock(&lmux, K_FOREVER);
-            printk("Signal sent to ");
+    // Try to start the sequence until it starts. Do not block because signals are not
+    // preserved if the receiver is not listening yet.
+    printk("Trying to start a sequence");
+    k_mutex_lock(&lmux, K_FOREVER);
+    k_condvar_broadcast(&rsig);
+    k_condvar_wait(&sig_ok, &lmux, K_FOREVER);
+    k_mutex_unlock(&lmux);
 
-            switch (color) {
-                case Red:
-                    k_condvar_signal(&rsig);
-                    printk("Red");
-                    break;
-                case Yellow:
-                    k_condvar_signal(&ysig);
-                    printk("Yellow");
-                    break;
-                default:
-                    k_condvar_signal(&gsig);
-                    printk("Green");
-                    break;
-            }
-
-            printk(" from main\n");
-            k_mutex_unlock(&lmux);
-        }
-        
-        k_msleep(HOLD_TIME_MS);
-    }
+    printk("OK!\nMain thread done!\n");
 
     return 0;
 }

@@ -22,13 +22,14 @@ K_THREAD_DEFINE(dispatchth, STACK_SIZE, dispatcher_task, &color, NULL, NULL, 3, 
 
 // Prints the information about usage to the UART shell in command line style
 void print_help(void) {
-    printk("\n\nUsage:\n\t[[R | Y | G | O]..INT]..\tSwitch light in given sequence\n\n");
+    printk("\n\nUsage:\n\t[[R | Y | G | O]..INT]..[[T]INT]\tSwitch light in given sequence and loop T times\n\n");
 };
 
 struct led_control_t {
     int seq_len;
     char colors[COMSIZ];
     uint16_t hold_times[COMSIZ];
+    uint16_t loop;
 };
 
 struct fifo_data_t {
@@ -73,6 +74,9 @@ void uart_task(void *, void *, void *) {
     int seqnt = 0;
     bool parsing_digits = false;
     bool uart_print = true;
+    // Loop through the given sequence n amount of times
+    uint16_t loop = 1;
+    bool expect_loop = false;
     // Used to pass the commands and hold times to dispatcher
     char command_buf[COMSIZ];
     uint16_t ht_buf[COMSIZ];
@@ -98,8 +102,6 @@ void uart_task(void *, void *, void *) {
             // Example:
             // `RYG500R200G500Y1000O` Changes colors Red, Yellow and Green in sequence, holding each on for 500ms.
             // Then it holds Red for 200ms, Green for 500ms, Yellow for 1s and finally turns leds off.
-            //
-            // I explicitly wanted to keep the state machine so the automatic mode could be used.
             
             printk("%c", rechar);
             if (!paused && state != Manual) {
@@ -127,11 +129,9 @@ void uart_task(void *, void *, void *) {
                 }
                 
                 memcpy(data->ledctl.colors, command_buf, COMSIZ);
-                memcpy(&data->ledctl.seq_len, &cnt, 4);
                 memcpy(data->ledctl.hold_times, ht_buf, sizeof(ht_buf));
-
-                printk("Hold time for index 0 is: %d\n", ht_buf[0]);
-                printk("Passing len %d of data to dispatcher\n", data->ledctl.seq_len);
+                data->ledctl.seq_len = cnt;
+                data->ledctl.loop = loop;
                 k_fifo_put(&dispatcher_fifo, data);
                 rechar = 0;
                 cnt = 0;
@@ -139,6 +139,8 @@ void uart_task(void *, void *, void *) {
                 memset(command_buf, 0, COMSIZ);
                 memset(ht_buf, 1000, sizeof(ht_buf));
                 uart_print = true;
+                expect_loop = false;
+                loop = 1;
             }
             
             // Parse digits
@@ -147,14 +149,19 @@ void uart_task(void *, void *, void *) {
                     parsing_digits = true;
                     seq_time_buf = 0;
                 }
+
                 // Convert to binary integer
-                seq_time_buf = seq_time_buf * 10 + (rechar - 48);
+                if (expect_loop) {
+                    loop = loop * 10 + (rechar - 48);
+                } else {
+                    seq_time_buf = seq_time_buf * 10 + (rechar - 48);
+                }
             }
             
             // Parse other characters
             else {
                 // Commands
-                if (rechar == 'R' || rechar == 'Y' || rechar == 'G' || rechar == 'O') {
+                if ((rechar == 'R' || rechar == 'Y' || rechar == 'G' || rechar == 'O') && !expect_loop) {
                     // Write previous sequence time info if present
                     if (parsing_digits) {
                         push_ht(ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
@@ -163,6 +170,21 @@ void uart_task(void *, void *, void *) {
                     int index = cnt + seqnt;
                     command_buf[index] = rechar;
                     seqnt++; // Increment sequence counter
+                    expect_loop = false;
+                }
+
+                // Parse loop command
+                else if (rechar == 'T') {
+                    if (parsing_digits) {
+                        push_ht(ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
+                    }
+
+                    if (expect_loop) {
+                        printk("\nYou cannot define T multiple times!\n");
+                    } else {
+                        expect_loop = true;
+                        loop = 0;
+                    }
                 }
                 
                 // If no comprehensible command was given or the command was erroneous, print help
@@ -174,6 +196,8 @@ void uart_task(void *, void *, void *) {
                     cnt = 0;
                     seqnt = 0;
                     parsing_digits = false;
+                    expect_loop = false;
+                    loop = 1;
                     seq_time_buf = 0;
                     memset(command_buf, 0, COMSIZ);
                     memset(ht_buf, 1000, sizeof(ht_buf));
@@ -189,71 +213,74 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
     while (true) {
         printk("Waiting for fifo data\n");
         struct fifo_data_t *rec_data = k_fifo_get(&dispatcher_fifo, K_FOREVER);
-        printk("Working on data with length: %d\n", rec_data->ledctl.seq_len);
 
-        // Iterate over each command (end with ecountering 0)
-        for (int i = 0; i < rec_data->ledctl.seq_len; i++) {
-            struct holdtime_t *ht = k_malloc(sizeof(struct holdtime_t));
-            memcpy(&ht->time, &rec_data->ledctl.hold_times[i], 2);
-            struct k_condvar *ledsig = NULL;
-
-            switch (rec_data->ledctl.colors[i]) {
-                case 'R':
-                    ledsig = &rsig;
-                    printk("Switched led to Red\n");
-                    break;
+        // Loop through the sequence
+        for (int l = 0; l < rec_data->ledctl.loop; l++) {
+            
+            // Iterate over each command (end with ecountering 0)
+            for (int i = 0; i < rec_data->ledctl.seq_len; i++) {
+                struct holdtime_t *ht = k_malloc(sizeof(struct holdtime_t));
+                memcpy(&ht->time, &rec_data->ledctl.hold_times[i], 2);
+                struct k_condvar *ledsig = NULL;
+    
+                switch (rec_data->ledctl.colors[i]) {
+                    case 'R':
+                        ledsig = &rsig;
+                        printk("Switched led to Red\n");
+                        break;
                     case 'Y':
-                    ledsig = &ysig;
-                    printk("Switched led to Yellow\n");
-                    break;
+                        ledsig = &ysig;
+                        printk("Switched led to Yellow\n");
+                        break;
                     case 'G':
-                    ledsig = &gsig;
-                    printk("Switched led to Green\n");
-                    break;
-                case 'O':
-                    switch (*curcol) {
-                        case Red:
-                            ledsig = &rsig;
-                            break;
-                        case Yellow:
-                            ledsig = &ysig;
-                            break;
-                        case Green:
-                            ledsig = &gsig;
-                            break;
-                        default:
-                            ledsig = NULL;
-                            printk("Can't turn led off if it is already off.\n");
-                            break;
-                    }
-
-                    printk("Switched led to Off\n");
-                    break;
-                default:
-                    k_oops();
-            }
-                
-                // Send the signal if it was set and wait for a generous amount of time for a answer.
-                if (ledsig != NULL) {
-                    printk("Waiting for lock to release\n");
-                    if (k_mutex_lock(&lmux, K_MSEC(5000)) == 0) {
-                         k_condvar_signal(ledsig);
-                        // Wait for minimum hold time to pass before continuing
-                        if (k_condvar_wait(&sig_ok, &lmux, K_MSEC(ht->time + HOLD_TIME_MS)) == 0) {
-                            // No reason to wait here if we only toggle one color because it holds
-                            if (rec_data->ledctl.seq_len > 1) k_msleep(ht->time);
-                        } else {
-                            printk("Waiting time expired!\n");
+                        ledsig = &gsig;
+                        printk("Switched led to Green\n");
+                        break;
+                    case 'O':
+                        switch (*curcol) {
+                            case Red:
+                                ledsig = &rsig;
+                                break;
+                            case Yellow:
+                                ledsig = &ysig;
+                                break;
+                            case Green:
+                                ledsig = &gsig;
+                                break;
+                            default:
+                                ledsig = NULL;
+                                printk("Can't turn led off if it is already off.\n");
+                                break;
                         }
-
-                    } else {
-                        printk("Mutex timed out\n");
-                    }
-
-                    k_mutex_unlock(&lmux);
+    
+                        printk("Switched led to Off\n");
+                        break;
+                    default:
+                        k_oops();
                 }
-
-                k_free(ht);
+                    
+                    // Send the signal if it was set and wait for a generous amount of time for a answer.
+                    if (ledsig != NULL) {
+                        printk("Waiting for lock to release\n");
+                        if (k_mutex_lock(&lmux, K_MSEC(5000)) == 0) {
+                             k_condvar_signal(ledsig);
+                            // Wait for minimum hold time to pass before continuing
+                            if (k_condvar_wait(&sig_ok, &lmux, K_MSEC(ht->time + HOLD_TIME_MS)) == 0) {
+                                // No reason to wait here if we only toggle one color because it holds
+                                if (rec_data->ledctl.seq_len > 1) k_msleep(ht->time);
+                            } else {
+                                printk("Waiting time expired!\n");
+                            }
+    
+                        } else {
+                            printk("Mutex timed out\n");
+                        }
+    
+                        k_mutex_unlock(&lmux);
+                    }
+    
+                    k_free(ht);
+            }
         }
 
         printk("Dispatcher done\n");
