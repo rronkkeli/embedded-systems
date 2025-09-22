@@ -4,3 +4,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(traffic_lights)
 
 target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE src/ledctl.c)
+target_sources(app PRIVATE src/buttons.c)
+target_sources(app PRIVATE src/dispatcher.c)
+target_sources(app PRIVATE src/mux.c)
