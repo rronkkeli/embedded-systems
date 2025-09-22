@@ -13,3 +13,6 @@ K_CONDVAR_DEFINE(sig_ok);
 
 // FIFO for hold time
 K_FIFO_DEFINE(ht_fifo);
+
+// Define semaphore for each led task
+K_SEM_DEFINE(threads_ready, 0, 3);

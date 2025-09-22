@@ -10,7 +10,6 @@
 #include "mux.h"
 
 #define STACK_SIZE 512
-#define PRIORITY 2
 // Define command sequence size once to deflect possible human errors from not remembering to change every occurance
 #define COMSIZ 20
 #define UART_DEVICE DT_CHOSEN(zephyr_shell_uart)
@@ -18,12 +17,12 @@ const struct device *uart_dev = DEVICE_DT_GET(UART_DEVICE);
 
 K_FIFO_DEFINE(dispatcher_fifo);
 
-K_THREAD_DEFINE(uartth, STACK_SIZE, uart_task, NULL, NULL, NULL, PRIORITY, 0, 0);
-K_THREAD_DEFINE(dispatchth, STACK_SIZE, dispatcher_task, NULL, NULL, NULL, PRIORITY-1, 0, 0);
+K_THREAD_DEFINE(uartth, STACK_SIZE, uart_task, NULL, NULL, NULL, 4, 0, 0);
+K_THREAD_DEFINE(dispatchth, STACK_SIZE, dispatcher_task, &color, NULL, NULL, 3, 0, 0);
 
 // Prints the information about usage to the UART shell in command line style
 void print_help(void) {
-    printk("Usage:\n\t[[R | Y | G | O]..INT]..\tSwitch light in given sequence\n\n");
+    printk("\n\nUsage:\n\t[[R | Y | G | O]..INT]..\tSwitch light in given sequence\n\n");
 };
 
 struct led_control_t {
@@ -82,7 +81,7 @@ void uart_task(void *, void *, void *) {
     uint16_t seq_time_buf = 1000;
     // Initialize `command` and `single_command` with zeros
     memset(command_buf, 0, COMSIZ);
-    memset(ht_buf, &seq_time_buf, sizeof(ht_buf));
+    memset(ht_buf, (int)&seq_time_buf, sizeof(ht_buf));
 
     // Infinitely wait for data to be read from UART
     while (true) {
@@ -103,8 +102,11 @@ void uart_task(void *, void *, void *) {
             // I explicitly wanted to keep the state machine so the automatic mode could be used.
             
             printk("%c", rechar);
-            if (!paused) paused = true;
-            state = Manual;
+            if (!paused && state != Manual) {
+                paused = true;
+                state = Manual;
+                cont = color;
+            }
 
             if (rechar == '\r') {
                 rechar = '\n';
@@ -115,7 +117,7 @@ void uart_task(void *, void *, void *) {
                 printk("\n");
                 push_ht(ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
                 
-                printk("Received: %s\n", &command_buf);
+                printk("Received: %s\n", command_buf);
                 // Allocate memory for fifo use
                 struct fifo_data_t *data = k_malloc(sizeof(struct fifo_data_t));
                 
@@ -179,11 +181,11 @@ void uart_task(void *, void *, void *) {
             }
         }
 
-        k_msleep(50);
+        k_msleep(100);
     }
 }
                 
-void dispatcher_task(void *, void *, void *) {
+void dispatcher_task(enum Color *curcol, void *, void *) {
     while (true) {
         printk("Waiting for fifo data\n");
         struct fifo_data_t *rec_data = k_fifo_get(&dispatcher_fifo, K_FOREVER);
@@ -192,10 +194,7 @@ void dispatcher_task(void *, void *, void *) {
         // Iterate over each command (end with ecountering 0)
         for (int i = 0; i < rec_data->ledctl.seq_len; i++) {
             struct holdtime_t *ht = k_malloc(sizeof(struct holdtime_t));
-            // printk("val: %d\n", rec_data->ledctl.hold_times[i]);
             memcpy(&ht->time, &rec_data->ledctl.hold_times[i], 2);
-            // printk("ht: %d\n", ht->time);
-            k_fifo_put(&ht_fifo, ht);
             struct k_condvar *ledsig = NULL;
 
             switch (rec_data->ledctl.colors[i]) {
@@ -203,34 +202,62 @@ void dispatcher_task(void *, void *, void *) {
                     ledsig = &rsig;
                     printk("Switched led to Red\n");
                     break;
-                case 'Y':
+                    case 'Y':
                     ledsig = &ysig;
                     printk("Switched led to Yellow\n");
                     break;
-                case 'G':
+                    case 'G':
                     ledsig = &gsig;
                     printk("Switched led to Green\n");
                     break;
-                default:
-                    set_off();
-                    printk("Switched led to Off\n");
-                    k_msleep(ht->time);
-                    k_free(ht);
-                    ledsig = NULL;
-                    break;
-            }
+                case 'O':
+                    switch (*curcol) {
+                        case Red:
+                            ledsig = &rsig;
+                            break;
+                        case Yellow:
+                            ledsig = &ysig;
+                            break;
+                        case Green:
+                            ledsig = &gsig;
+                            break;
+                        default:
+                            ledsig = NULL;
+                            printk("Can't turn led off if it is already off.\n");
+                            break;
+                    }
 
-            printk("Waiting for lock to release\n");
-            // Wait for the release signal from led task
-            if (ledsig != NULL) {
-                k_condvar_signal(ledsig);
-                k_condvar_wait(&sig_ok, &lmux, K_FOREVER);
+                    printk("Switched led to Off\n");
+                    break;
+                default:
+                    k_oops();
             }
+                
+                // Send the signal if it was set and wait for a generous amount of time for a answer.
+                if (ledsig != NULL) {
+                    printk("Waiting for lock to release\n");
+                    if (k_mutex_lock(&lmux, K_MSEC(5000)) == 0) {
+                         k_condvar_signal(ledsig);
+                        // Wait for minimum hold time to pass before continuing
+                        if (k_condvar_wait(&sig_ok, &lmux, K_MSEC(ht->time + HOLD_TIME_MS)) == 0) {
+                            // No reason to wait here if we only toggle one color because it holds
+                            if (rec_data->ledctl.seq_len > 1) k_msleep(ht->time);
+                        } else {
+                            printk("Waiting time expired!\n");
+                        }
+
+                    } else {
+                        printk("Mutex timed out\n");
+                    }
+
+                    k_mutex_unlock(&lmux);
+                }
+
+                k_free(ht);
         }
 
         printk("Dispatcher done\n");
 
         k_free(rec_data);
-        k_yield();
     }
 }

@@ -2,51 +2,38 @@
 #define LEDCTL_H
 
 extern const uint32_t HOLD_TIME_MS;
-extern bool paused;
+extern volatile bool paused;
 
 // This simplifies the state machine syntax (instead of using integers)
-enum State { Red, Yellow, Green, Yblink, Manual };
+enum State { Auto, Manual, Blink };
 
 // Holds the state of two leds
-enum Color { LOff, LRed, LGreen, LYellow };
+enum Color { Off, Red, Yellow, Green };
 
 // Current state variables initialized to red
-extern enum State state;
-extern enum State cont;
-extern enum Color color;
+extern volatile enum State state;
+extern volatile enum Color cont;
+extern volatile enum Color color;
 
 extern const k_tid_t redth;
 extern const k_tid_t yellowth;
 extern const k_tid_t greenth;
 
-extern volatile bool red_ignore;
-extern volatile bool yellow_ignore;
-extern volatile bool green_ignore;
-
 bool init_leds(void);
 
 /*
-    Hold the red led on for a specified time, or hold it for a default time. If ht_fifo time
-    most significant bit is set, led is turned off instead of on.
-
-    Hold time, if given in manual mode, determines the minimum time for the led on or off state.
+    Set red on, if it is not on. Otherwise set it off.
 */
-void red(enum State *state, void  *, void *);
+void red(enum State *state, enum Color *color, void *);
 
 /*
-    Hold the yellow led on for a specified time, or hold it for a default time. If ht_fifo time
-    most significant bit is set, led is turned off instead of on.
-
-    Hold time, if given in manual mode, determines the minimum time for the led on or off state.
+    Set yellow on, if it is not on. Otherwise set it off.
 */
-void yellow(enum State *state, void  *, void *);
+void yellow(enum State *state, enum Color *color, void *);
 
 /*
-    Hold the green led on for a specified time, or hold it for a default time. If ht_fifo time
-    most significant bit is set, led is turned off instead of on.
-
-    Hold time, if given in manual mode, determines the minimum time for the led on or off state.
+    Set green on, if it is not on. Otherwise set it off.
 */
-void green(enum State *state, void  *, void *);
+void green(enum State *state, enum Color *color, void *);
 
 #endif

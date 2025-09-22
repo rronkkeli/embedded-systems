@@ -2,10 +2,9 @@
 #define DISPATCHER_H
 
 extern void uart_task(void *, void *, void *);
-extern void dispatcher_task(void *, void *, void *);
+extern void dispatcher_task(enum Color *, void *, void *);
 
 extern struct k_fifo command_fifo;
-// extern struct fifo_data data;
 
 bool init_uart(void);
 

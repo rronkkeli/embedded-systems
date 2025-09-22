@@ -10,7 +10,7 @@ void yblink_toggle_isr(void);
 
 // Helper functions and variable to enable an disable interrupts for pause button
 // and to detect if the interrupts are enabled or disabled
-void interrupt_enable(void);
+void interrupt_enable(void); 
 void interrupt_disable(void);
 
 bool init_buttons(void);

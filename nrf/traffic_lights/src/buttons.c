@@ -37,8 +37,6 @@ static struct gpio_callback yblink_cb_data;
 
 static bool interrupt_enabled = true;
 
-static const struct holdtime_t stop_waiting = {.fifo_reserved = &ht_fifo, .time = 0};
-
 bool init_buttons(void)
 {
     // Check that buttons are ready
@@ -126,13 +124,15 @@ void manual_isr(void)
 
     // If we are pausing, save the current state and set state to MANUAL
     if (paused) {
-        cont = state;
+        // Save the current color
+        cont = color;
         state = Manual;
-        printf("Manual control\n");
+        printk("Manual control\n");
     // If we are unpausing, restore the saved state
     } else {
-        state = cont;
-        printf("Automatic\n");
+        state = Auto;
+        color = cont;
+        printk("Automatic: State_%d, Color_%d\n", state, color);
     }
 }
 
@@ -144,20 +144,13 @@ void red_toggle_isr(void)
 
     // Only do something if we are paused
     if (paused) {
-        if (state == Yblink) {
+        if (state == Blink) {
             state = Manual;
             printf("Toggling YELLOW BLINK OFF\n");
         }
 
-
-        if (color == LRed) {
-            color = LOff;
-            set_off();
-        } else {
-            color = LRed;
-            set_red();
-        }
-
+        // Send signal to red task
+        k_condvar_signal(&rsig);
         printf("Toggling RED\n");
     }
 }
@@ -169,19 +162,13 @@ void yellow_toggle_isr(void)
     latest_push = k_uptime_get_32();
 
     if (paused) {
-        if (state == Yblink) {
+        if (state == Blink) {
             state = Manual;
             printf("Toggling YELLOW BLINK OFF\n");
         }
 
-        if (color == LYellow) {
-            color = LOff;
-            set_off();
-        } else {
-            color = LYellow;
-            set_yellow();
-        }
-
+        // Send signal to yellow task
+        k_condvar_signal(&ysig);
         printf("Toggling YELLOW\n");
     }
 
@@ -194,19 +181,13 @@ void green_toggle_isr(void)
     latest_push = k_uptime_get_32();
 
     if (paused) {
-        if (state == Yblink) {
+        if (state == Blink) {
             state = Manual;
             printf("Toggling YELLOW BLINK OFF\n");
         }
         
-        if (color == LGreen) {
-            color = LOff;
-            set_off();
-        } else {
-            color = LGreen;
-            set_green();
-        }
-
+        // Send signal to green task
+        k_condvar_signal(&gsig);
         printf("Toggling GREEN\n");
     }
 }
@@ -219,12 +200,15 @@ void yblink_toggle_isr(void)
 
     if (paused) {
         // Toggle blinking yellow mode
-        if (state != Yblink) {
-            state = Yblink;
+        if (state != Blink) {
+            state = Blink;
             printf("Toggling YELLOW BLINK ON\n");
         } else {
             state = Manual;
             printf("Toggling YELLOW BLINK OFF\n");
         }
     }
+
+    // Send signal to yellow task
+    k_condvar_signal(&ysig);
 }
