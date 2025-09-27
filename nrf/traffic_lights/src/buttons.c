@@ -5,6 +5,7 @@
 #include "buttons.h"
 #include "ledctl.h"
 #include "mux.h"
+#include "debug.h"
 
 // Manual drive button is button 0
 #define MANUAL DT_ALIAS(sw0)
@@ -42,7 +43,7 @@ bool init_buttons(void)
     if (!gpio_is_ready_dt(&manual_button) || !gpio_is_ready_dt(&red_toggle) ||
     !gpio_is_ready_dt(&yellow_toggle) || !gpio_is_ready_dt(&green_toggle) ||
     !gpio_is_ready_dt(&yblink_toggle)) {
-        printf("Error: Button device not ready\n");
+        DBG("Error: Button device not ready\n");
         return false;
     }
 
@@ -52,7 +53,7 @@ bool init_buttons(void)
         || gpio_pin_configure_dt(&yellow_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
         || gpio_pin_configure_dt(&green_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
         || gpio_pin_configure_dt(&yblink_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0) {
-        printf("Error: Failed to configure IO\n");
+        DBG("Error: Failed to configure IO\n");
 		return false;
 	}
 
@@ -62,7 +63,7 @@ bool init_buttons(void)
     gpio_pin_interrupt_configure_dt(&yellow_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0 ||
     gpio_pin_interrupt_configure_dt(&green_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0 ||
     gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0) {
-        printf("Error: Failed to configure button interrupt\n");
+        DBG("Error: Failed to configure button interrupt\n");
         return false;
     }
 
@@ -78,7 +79,7 @@ bool init_buttons(void)
     gpio_add_callback(yellow_toggle.port, &yellow_cb_data) < 0 ||
     gpio_add_callback(green_toggle.port, &green_cb_data) < 0 ||
     gpio_add_callback(yblink_toggle.port, &yblink_cb_data) < 0) {
-        printf("Error: Failed to add button callback(s)\n");
+        DBG("Error: Failed to add button callback(s)\n");
         return false;
     }
 
@@ -98,7 +99,7 @@ void interrupt_enable(void)
         gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_EDGE_TO_ACTIVE);
     }
 
-    printk("Interrupts enabled\n");
+    DBG("Interrupts enabled\n");
 }
 
 void interrupt_disable(void)
@@ -122,7 +123,7 @@ void manual_isr(void)
         // Save the current color
         cont = color;
         state = Manual;
-        printk("Manual control\n");
+        DBG("Manual control\n");
     // If we are unpausing, restore the saved state
     } else {
         if (k_mutex_lock(&lmux, K_NO_WAIT) == 0) {
@@ -141,7 +142,7 @@ void manual_isr(void)
                     break;
             }
         } else {
-            printk("Try again. Mutex is busy\n");
+            DBG("Try again. Mutex is busy\n");
         }
 
         k_mutex_unlock(&lmux);
@@ -156,12 +157,12 @@ void red_toggle_isr(void)
     if (paused) {
         if (state == Blink) {
             state = Manual;
-            printf("Toggling YELLOW BLINK OFF\n");
+            DBG("Toggling YELLOW BLINK OFF\n");
         }
 
         // Send signal to red task
         k_condvar_signal(&rsig);
-        printf("Toggling RED\n");
+        DBG("Toggling RED\n");
     }
 }
 
@@ -172,12 +173,12 @@ void yellow_toggle_isr(void)
     if (paused) {
         if (state == Blink) {
             state = Manual;
-            printf("Toggling YELLOW BLINK OFF\n");
+            DBG("Toggling YELLOW BLINK OFF\n");
         }
 
         // Send signal to yellow task
         k_condvar_signal(&ysig);
-        printf("Toggling YELLOW\n");
+        DBG("Toggling YELLOW\n");
     }
 
 }
@@ -189,12 +190,12 @@ void green_toggle_isr(void)
     if (paused) {
         if (state == Blink) {
             state = Manual;
-            printf("Toggling YELLOW BLINK OFF\n");
+            DBG("Toggling YELLOW BLINK OFF\n");
         }
         
         // Send signal to green task
         k_condvar_signal(&gsig);
-        printf("Toggling GREEN\n");
+        DBG("Toggling GREEN\n");
     }
 }
 
@@ -206,10 +207,10 @@ void yblink_toggle_isr(void)
         // Toggle blinking yellow mode
         if (state != Blink) {
             state = Blink;
-            printf("Toggling YELLOW BLINK ON\n");
+            DBG("Toggling YELLOW BLINK ON\n");
         } else {
             state = Manual;
-            printf("Toggling YELLOW BLINK OFF\n");
+            DBG("Toggling YELLOW BLINK OFF\n");
         }
     }
 

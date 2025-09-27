@@ -8,6 +8,7 @@
 #include "ledctl.h"
 #include "dispatcher.h"
 #include "mux.h"
+#include "debug.h"
 
 #define STACK_SIZE 512
 // Define command sequence size once to deflect possible human errors from not remembering to change every occurance
@@ -41,21 +42,18 @@ bool init_uart(void) {
     if (device_is_ready(uart_dev)) {
         return true;
     }
-    printk("UART initialization failed\n");
+    DBG("UART initialization failed\n");
     return false;
 }
 
 // Helper function to push hold time buffer contents to hold time data array
 void push_ht(uint16_t *ht_dat, uint16_t *ht, int *offset, int *len, bool *pd) {
-    // printk("Called push_ht\n");
     // Update each corresponding hold time of the sequence
     uint16_t holdfor = *ht;
 
-    // printk("holdfor: %dms\n", holdfor);
 
     while (*len > 0) {
         int ix = *offset;
-        // printk("Index of hold times: %d\n", ix);
         ht_dat[ix] = holdfor;
         *offset += 1; // One command handled -> increment the offset
         *len -= 1; // ..and decrement length
@@ -66,7 +64,7 @@ void push_ht(uint16_t *ht_dat, uint16_t *ht, int *offset, int *len, bool *pd) {
 }
 
 void uart_task(void *, void *, void *) {
-    printk("Started uart task\n");
+    DBG("Started uart task\n");
     // Holds the received single character
     char rechar = 0;
     // Holds the count of received characters from UART and also is the index and seqnt counts the commands in sequence
@@ -91,7 +89,7 @@ void uart_task(void *, void *, void *) {
     while (true) {
         if (uart_print) {
             uart_print = false;
-            printk("Waiting for UART\n");
+            DBG("Waiting for UART\n");
         }
         // Received a character through UART -> handle it
         if (uart_poll_in(uart_dev, &rechar) == 0) {
@@ -119,12 +117,12 @@ void uart_task(void *, void *, void *) {
                 printk("\n");
                 push_ht(ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
                 
-                printk("Received: %s\n", command_buf);
+                DBG("Received: %s\n", command_buf);
                 // Allocate memory for fifo use
                 struct fifo_data_t *data = k_malloc(sizeof(struct fifo_data_t));
                 
                 if (data == NULL) {
-                    printk("Memory allocation error.\n");
+                    DBG("Memory allocation error.\n");
                     return;
                 }
                 
@@ -211,7 +209,7 @@ void uart_task(void *, void *, void *) {
                 
 void dispatcher_task(enum Color *curcol, void *, void *) {
     while (true) {
-        printk("Waiting for fifo data\n");
+        DBG("Waiting for fifo data\n");
         struct fifo_data_t *rec_data = k_fifo_get(&dispatcher_fifo, K_FOREVER);
 
         // Loop through the sequence
@@ -226,15 +224,15 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
                 switch (rec_data->ledctl.colors[i]) {
                     case 'R':
                         ledsig = &rsig;
-                        printk("Switched led to Red\n");
+                        DBG("Switched led to Red\n");
                         break;
                     case 'Y':
                         ledsig = &ysig;
-                        printk("Switched led to Yellow\n");
+                        DBG("Switched led to Yellow\n");
                         break;
                     case 'G':
                         ledsig = &gsig;
-                        printk("Switched led to Green\n");
+                        DBG("Switched led to Green\n");
                         break;
                     case 'O':
                         switch (*curcol) {
@@ -249,11 +247,11 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
                                 break;
                             default:
                                 ledsig = NULL;
-                                printk("Can't turn led off if it is already off.\n");
+                                DBG("Can't turn led off if it is already off.\n");
                                 break;
                         }
     
-                        printk("Switched led to Off\n");
+                        DBG("Switched led to Off\n");
                         break;
                     default:
                         k_oops();
@@ -261,7 +259,7 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
                     
                     // Send the signal if it was set and wait for a generous amount of time for a answer.
                     if (ledsig != NULL) {
-                        printk("Waiting for lock to release\n");
+                        DBG("Waiting for lock to release\n");
                         if (k_mutex_lock(&lmux, K_MSEC(5000)) == 0) {
                              k_condvar_signal(ledsig);
                             // Wait for minimum hold time to pass before continuing
@@ -269,11 +267,11 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
                                 // No reason to wait here if we only toggle one color because it holds
                                 if (rec_data->ledctl.seq_len > 1) k_msleep(ht->time);
                             } else {
-                                printk("Waiting time expired!\n");
+                                DBG("Waiting time expired!\n");
                             }
     
                         } else {
-                            printk("Mutex timed out\n");
+                            DBG("Mutex timed out\n");
                         }
     
                         k_mutex_unlock(&lmux);
@@ -283,7 +281,7 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
             }
         }
 
-        printk("Dispatcher done\n");
+        DBG("Dispatcher done\n");
 
         k_free(rec_data);
     }

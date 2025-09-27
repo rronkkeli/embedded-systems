@@ -15,12 +15,14 @@ extern struct k_condvar sig_ok;
 // Fifo data for hold time
 extern struct k_fifo ht_fifo;
 
-// Semaphore inform main thread that led tasks are ready
+// Semaphore to inform main thread that led tasks are ready
 extern struct k_sem threads_ready;
 
 struct holdtime_t {
     void *fifo_reserved;
     uint16_t time;
 };
+
+extern atomic_t ltime_set;
 
 #endif

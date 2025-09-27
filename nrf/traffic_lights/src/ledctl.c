@@ -1,9 +1,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/random/random.h>
+#include <zephyr/timing/timing.h>
 
 #include "ledctl.h"
 #include "mux.h"
+#include "debug.h"
 
 // Set transition time between colors
 const uint32_t HOLD_TIME_MS = 1000;
@@ -31,15 +32,15 @@ volatile enum Color color = Red;
 // Red -> Yellow -> Green -> Red.. and on manual mode each task sends a release signal for dispatcher.
 // Define tasks for each color
 K_THREAD_DEFINE(redth, STACKSIZE,
-		red, &state, &color, NULL,
+		red, &state, &color, &rtime,
 		PRIORITY, 0, 0);
 
 K_THREAD_DEFINE(yellowth, STACKSIZE,
-        yellow, &state, &color, NULL,
+        yellow, &state, &color, &ytime,
         PRIORITY, 0, 0);
 
 K_THREAD_DEFINE(greenth, STACKSIZE,
-        green, &state, &color, NULL,
+        green, &state, &color, &gtime,
         PRIORITY, 0, 0);
         
 // Helper functions for tasks
@@ -53,42 +54,65 @@ bool init_leds(void)
 {
     // Check that on-board leds are ready
     if (!gpio_is_ready_dt(&red_led) || !gpio_is_ready_dt(&green_led)) {
-        printf("Error: LED device(s) not ready\n");
+        DBG("Error: LED device(s) not ready\n");
         return false;
     }
 
     if (gpio_pin_configure_dt(&red_led, GPIO_OUTPUT_ACTIVE) < 0 ||
         gpio_pin_configure_dt(&green_led, GPIO_OUTPUT_ACTIVE) < 0) {
-        printf("Error: Failed to configure LED pins\n");
+        DBG("Error: Failed to configure LED pins\n");
         return false;
     }
 
     return true;
 }
 
-void red(enum State *state, enum Color *color, void *)
+void red(enum State *state, enum Color *color, uint64_t *rtime)
 {
+    timing_t start;
     k_sem_give(&threads_ready);
     // Loop forever
     while (1) {
+        start = timing_counter_get();
+
         // Wait for a signal to switch led on and off
+        DBG("Waiting for lmux mutex..");
         k_mutex_lock(&lmux, K_FOREVER);
+
+        DBG("Done!\nWaiting for condition variable rsig..");
+
         if (k_condvar_wait(&rsig, &lmux, K_FOREVER) == 0) {
+            DBG("Done!\n");
+
             toggle_led(*state, color, Red);
         }
+
+        if (!atomic_test_bit(&ltime_set, 0)) {
+            *rtime = timing_cycles_to_ns(timing_counter_get() - start);
+            atomic_set_bit(&ltime_set, 0);
+        }
+
         k_mutex_unlock(&lmux);
         k_yield();
     }
 }
 
-void yellow(enum State *state, enum Color *color, void *)
+void yellow(enum State *state, enum Color *color, uint64_t *ytime)
 {
+    timing_t start;
     k_sem_give(&threads_ready);    
     // Loop forever
     while (1) {
+        start = timing_counter_get();
+
         // Wait for a signal to switch led on and off
+        DBG("Waiting for lmux mutex..");
         k_mutex_lock(&lmux, K_FOREVER);
+
+        DBG("Done!\nWaiting for condition variable ysig..");
+
         if (k_condvar_wait(&ysig, &lmux, K_FOREVER) == 0) {
+            DBG("Done!\n");
 
             if (*state == Blink) {
                 while (*state == Blink) {
@@ -101,21 +125,42 @@ void yellow(enum State *state, enum Color *color, void *)
                 toggle_led(*state, color, Yellow);
             }
         }
+
+        if (!atomic_test_bit(&ltime_set, 1)) {
+            *ytime = timing_cycles_to_ns(timing_counter_get() - start);
+            atomic_set_bit(&ltime_set, 1);
+        }
+
         k_mutex_unlock(&lmux);
         k_yield();
     }
 }
 
-void green(enum State *state, enum Color *color, void *)
+void green(enum State *state, enum Color *color, uint64_t *gtime)
 {
+    timing_t start;
     k_sem_give(&threads_ready);
     // Loop forever
     while (1) {
+        start = timing_counter_get();
+
         // Wait for a signal to switch led on and off
+        DBG("Waiting for lmux mutex..");
         k_mutex_lock(&lmux, K_FOREVER);
+
+        DBG("Done!\nWaiting for condition variable gsig..");
+
         if (k_condvar_wait(&gsig, &lmux, K_FOREVER) == 0) {
+            DBG("Done!\n");
+
             toggle_led(*state, color, Green);
         }
+        
+        if (!atomic_test_bit(&ltime_set, 2)) {
+            *gtime = timing_cycles_to_ns(timing_counter_get() - start);
+            atomic_set_bit(&ltime_set, 2);
+        }
+
         k_mutex_unlock(&lmux);
         k_yield();
     }
@@ -141,7 +186,7 @@ void toggle_led(enum State state, enum Color *from_color, enum Color to_color) {
             break;
         default:
             set_color = &set_off;
-            printk("Thread was killed\n");
+            DBG("Thread was killed\n");
             k_oops();
     }
 
