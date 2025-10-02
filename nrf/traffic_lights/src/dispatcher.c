@@ -3,6 +3,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/timing/timing.h>
 
 #include "ledctl.h"
 #include "dispatcher.h"
@@ -22,7 +23,7 @@ K_THREAD_DEFINE(dispatchth, STACK_SIZE, dispatcher_task, &color, NULL, NULL, 3, 
 
 // Prints the information about usage to the UART shell in command line style
 void print_help(void) {
-    printk("\n\nUsage:\n\t[[R | Y | G | O]..INT]..[[T]INT]\tSwitch light in given sequence and loop T times\n\n");
+    printk("\n\nUsage:\n\t[[R | Y | G | O]..INT]..[[T]INT]\tSwitch light in given sequence and loop T times\n\n\tUse D to toggle debug on or off (does not echo)\n\n");
 };
 
 struct led_control_t {
@@ -38,7 +39,6 @@ struct fifo_data_t {
 };
 
 bool init_uart(void) {
-    struct debug_fifo_t *debug;
     if (device_is_ready(uart_dev)) {
         return true;
     }
@@ -100,6 +100,12 @@ void uart_task(void *, void *, void *) {
             // Example:
             // `RYG500R200G500Y1000O` Changes colors Red, Yellow and Green in sequence, holding each on for 500ms.
             // Then it holds Red for 200ms, Green for 500ms, Yellow for 1s and finally turns leds off.
+
+            // Toggle debug messages on and off but do not print anything.
+            if (rechar == 'D') {
+                print_debug_messages = !print_debug_messages;
+                continue;
+            }
             
             printk("%c", rechar);
             if (!paused && state != Manual) {
@@ -212,6 +218,9 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
         debug("Waiting for fifo data");
         struct fifo_data_t *rec_data = k_fifo_get(&dispatcher_fifo, K_FOREVER);
 
+        // Begin counting
+        timing_t start = timing_counter_get();
+
         // Loop through the sequence
         for (int l = 0; l < rec_data->ledctl.loop; l++) {
             
@@ -281,7 +290,7 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
             }
         }
 
-        debug("Dispatcher done");
+        debug("Dispatcher done! Execution time: %llu ns", timing_cycles_to_ns(timing_counter_get() - start));
 
         k_free(rec_data);
     }

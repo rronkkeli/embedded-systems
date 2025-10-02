@@ -17,6 +17,8 @@
 
 int main(void)
 {
+    bool initval_debug = print_debug_messages;
+    print_debug_messages = true;
     // Initialize timing timer and start it. Leaving this running does not actually cost anything for us
     timing_init();
     timing_start();
@@ -53,7 +55,8 @@ int main(void)
     k_mutex_unlock(&lmux);
 
     uint64_t elapsed = timing_cycles_to_ns(timing_counter_get() - start);
-    debug("OK!Main thread done! Took: %lld ns", elapsed);
+    debug("OK! Main thread done! Took: %lld ns", elapsed);
 
+    print_debug_messages = initval_debug;
     return 0;
 }

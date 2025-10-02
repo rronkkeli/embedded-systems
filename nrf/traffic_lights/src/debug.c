@@ -50,7 +50,7 @@ struct debug_fifo_t {
     struct debug_t dbg;
 };
 
-volatile bool print_debug_messages = true;
+volatile bool print_debug_messages = false;
 
 K_FIFO_DEFINE(debug_fifo);
 K_THREAD_DEFINE(debugth, 1024, debug_task, NULL, NULL, NULL, 10, 0, 0);
@@ -63,9 +63,8 @@ void debug_task(void *, void *, void *) {
     while (1) {
         // Check the fifo queue for available messages and parse them until none are left. Yield for a longer period after the queue has been
         // processed to give room for more important tasks.
-        printk(".");
         while ((data = k_fifo_get(&debug_fifo, K_NO_WAIT)) != NULL) {
-            printk("DEBUG %d: ", data->dbg.argc);
+            printk("DEBUG: ");
             switch (data->dbg.argc) {
                 case 0:
                     printk(data->dbg.fmt);
@@ -88,7 +87,7 @@ void debug_task(void *, void *, void *) {
             k_mem_slab_free(&debug_messages, data);
         }
 
-        k_msleep(2000);
+        k_msleep(200);
     }
 }
 
