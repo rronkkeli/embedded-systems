@@ -1,36 +1,106 @@
+/** Yeah, I may have gone a little overboard with this debugger. The reason behind that is that I wanted to
+ *  learn how to actually pass variable amount of arguments to other tasks, so that other tasks don't have
+ *  to format the debug messages themselves and can just immediately carry on as usual.
+ * 
+ *  This is how this is supposed to work: A normal working thread calls debug function with some debug message and
+ *  formatting variables, like any other formatting print function. This debug function quickly allocates memory
+ *  from memory slabs for the fifo messages, and for the arguments from a dedicated slab.
+ */
+
 #include <zephyr/kernel.h>
+#include <zephyr/timing/timing.h>
 
 #include "debug.h"
 #include "mux.h"
 
-uint64_t rtime = 0;
-uint64_t ytime = 0;
-uint64_t gtime = 0;
+// Argument amount that can be stored in one memory slab block.
+#define ARGS_PER_BLOCK 4
+#define MAX_ARGS 4
+// Block amount in one memory slab.
+#define MEM_SLAB_BLOCKS 32
 
-K_THREAD_DEFINE(debugth, 512, debug_task, &rtime, &ytime, &gtime, 2, 0, 0);
+void debug_task(void *, void*, void *);
 
-void debug_task(uint64_t *r, uint64_t *y, uint64_t *g) {
-    uint64_t sequence_elapsed;
-    int counter = 0;
+/* 
+    Holds a tight, non-fragmentable memory block for debug messages. Each message may only be 128 characters long.
+    There is room for 16 simultaneous messages in total. Use `k_mem_slab_alloc(&debug_messages, (void **)&fifodata, some_wait_time)`
+    to allocate a slab block for a debug message. 
+*/
+struct k_mem_slab debug_messages;
+
+/*
+    FIFO queue for debug messages. Expects `struct debug_fifo_t` type data.
+*/
+struct k_fifo debug_fifo;
+
+/*
+    Store one single argument and point to next four argument block, which is unnlikely. Usually 4 is quite enough for any debug message.
+*/
+struct debug_t {
+    const char *fmt;
+    size_t argc;
+    uintptr_t args[MAX_ARGS];
+};
+
+/* 
+    Each debug fifo element holds a string pointer to arbitrary sized string that needs to be formatted.
+*/
+struct debug_fifo_t {
+    void *fifo_reserved;
+    struct debug_t dbg;
+};
+
+volatile bool print_debug_messages = true;
+
+K_FIFO_DEFINE(debug_fifo);
+K_THREAD_DEFINE(debugth, 1024, debug_task, NULL, NULL, NULL, 10, 0, 0);
+K_MEM_SLAB_DEFINE(debug_messages, sizeof(struct debug_t), MEM_SLAB_BLOCKS, 4);
+
+
+void debug_task(void *, void *, void *) {
+    struct debug_fifo_t *data;
 
     while (1) {
-        // Check if all led tasks have updated their runtime variables and print the information about sequence time
-        if (atomic_cas(&ltime_set, 7, 0)) {
-            k_mutex_lock(&lmux, K_FOREVER);
-            printk("Red task took: %lld ns\n", *r);
-            printk("Yellow task took: %lld ns\n", *y);
-            printk("Green task took: %lld ns\n", *g);
-            printk("Sequence took: %lld ns\n", *r + *y + *g);
-            k_mutex_unlock(&lmux);
+        // Check the fifo queue for available messages and parse them until none are left. Yield for a longer period after the queue has been
+        // processed to give room for more important tasks.
+        printk(".");
+        while ((data = k_fifo_get(&debug_fifo, K_NO_WAIT)) != NULL) {
+            printk("DEBUG %d: ", data->dbg.argc);
+            switch (data->dbg.argc) {
+                case 0:
+                    printk(data->dbg.fmt);
+                    break;
+                case 1:
+                    printk(data->dbg.fmt, data->dbg.args[0]);
+                    break;
+                case 2:
+                    printk(data->dbg.fmt, data->dbg.args[0], data->dbg.args[1]);
+                    break;
+                case 3:
+                    printk(data->dbg.fmt, data->dbg.args[0], data->dbg.args[1], data->dbg.args[2]);
+                    break;
+                case 4:
+                    printk(data->dbg.fmt, data->dbg.args[0], data->dbg.args[1], data->dbg.args[2], data->dbg.args[3]);
+                    break;
+            }
 
-            counter++;
+            printk("\n");
+            k_mem_slab_free(&debug_messages, data);
         }
 
-        if (counter == 5) {
-            break;
-        } else {
-            k_msleep(100);
-        }
+        k_msleep(2000);
     }
-    
+}
+
+void schedule_printk(const char *fmt, size_t argc, uintptr_t *args) {
+    struct debug_fifo_t *data;
+
+    if (k_mem_slab_alloc(&debug_messages, (void **)&data, K_NO_WAIT) == 0) {
+        data->dbg.fmt = fmt;
+        data->dbg.argc = argc;
+        memcpy(data->dbg.args, args, argc * sizeof(uintptr_t));
+        k_fifo_put(&debug_fifo, data);
+    } else {
+        printk("I die :(\n");
+    }
 }

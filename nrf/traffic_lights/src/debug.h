@@ -1,23 +1,22 @@
 #ifndef DEBUG_H
 #define DEBUG_H
 
-
-// Running time variables. Protected with mutex `lmux`
-extern uint64_t rtime;
-extern uint64_t ytime;
-extern uint64_t gtime;
-
-void debug_task(uint64_t *r, uint64_t *y, uint64_t *g);
+extern volatile bool print_debug_messages;
 
 /*
-    Use CONFIG_DEBUG=y in prj.conf to enable this custom debug printing.
+    This function behaves like printk, but instead of printing directly to serial port, it queues the debug string to be printed
+    by the debug task. The formatted string must not exceed 128 characters when included the null character at the end.
 */
-#ifdef CONFIG_DEBUG
-    // Print debug messages to serial port when CONFIG_DEBUG=y. Expands to printk(...).
-    #define DBG(...) printk(__VA_ARGS__)
-#else
-    // Print debug messages to serial port when CONFIG_DEBUG=y. Expands to void.
-    #define DBG(...)
-#endif
+void schedule_printk(const char *fmt, size_t argc, uintptr_t *args);
+
+// Schedule printk function to debug task
+#define debug(fmt, ...) \
+    if (print_debug_messages) {\
+        do {\
+            uintptr_t args[] = { __VA_OPT__( (uintptr_t)(__VA_ARGS__) ) };\
+            size_t argc = sizeof(args) / sizeof(uintptr_t);\
+            schedule_printk(fmt, argc, args);\
+        } while (0);\
+    }\
 
 #endif // DEBUG_H

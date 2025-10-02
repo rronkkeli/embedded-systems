@@ -24,16 +24,16 @@ bool init_leds(void);
 /*
     Set red on, if it is not on. Otherwise set it off.
 */
-void red(enum State *state, enum Color *color, uint64_t *rtime);
+void red(enum State *state, enum Color *color, void *);
 
 /*
     Set yellow on, if it is not on. Otherwise set it off.
 */
-void yellow(enum State *state, enum Color *color, uint64_t *ytime);
+void yellow(enum State *state, enum Color *color, void *);
 
 /*
     Set green on, if it is not on. Otherwise set it off.
 */
-void green(enum State *state, enum Color *color, uint64_t *gtime);
+void green(enum State *state, enum Color *color, void *);
 
 #endif

@@ -26,34 +26,34 @@ int main(void)
     if (!init_leds()) {
         return 0;
     }
-    DBG("Initialized leds\n");
+    debug("Initialized leds");
     
     if (!init_buttons()) {
         return 0;
     }
-    DBG("Initialized buttons\n");
+    debug("Initialized buttons");
     
     if (!init_uart()) {
         return 0;
     }
-    DBG("Initialized uart\n");
+    debug("Initialized uart");
 
     for (int i = 0; i < 3; i++) {
         k_sem_take(&threads_ready, K_FOREVER);
-        DBG("Sem: %d\n", i);
+        debug("Sem: %d", i);
         k_msleep(100);
     }
 
     // Try to start the sequence until it starts. Do not block because signals are not
     // preserved if the receiver is not listening yet.
-    DBG("Trying to start a sequence");
+    debug("Trying to start a sequence");
     k_mutex_lock(&lmux, K_FOREVER);
     k_condvar_broadcast(&rsig);
     k_condvar_wait(&sig_ok, &lmux, K_FOREVER);
     k_mutex_unlock(&lmux);
 
     uint64_t elapsed = timing_cycles_to_ns(timing_counter_get() - start);
-    DBG("OK!\nMain thread done! Took: %lld ns\n", elapsed);
+    debug("OK!Main thread done! Took: %lld ns", elapsed);
 
     return 0;
 }

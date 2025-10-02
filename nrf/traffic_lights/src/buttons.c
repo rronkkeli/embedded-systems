@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 
@@ -43,7 +42,7 @@ bool init_buttons(void)
     if (!gpio_is_ready_dt(&manual_button) || !gpio_is_ready_dt(&red_toggle) ||
     !gpio_is_ready_dt(&yellow_toggle) || !gpio_is_ready_dt(&green_toggle) ||
     !gpio_is_ready_dt(&yblink_toggle)) {
-        DBG("Error: Button device not ready\n");
+        debug("Error: Button device not ready\n");
         return false;
     }
 
@@ -53,7 +52,7 @@ bool init_buttons(void)
         || gpio_pin_configure_dt(&yellow_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
         || gpio_pin_configure_dt(&green_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0
         || gpio_pin_configure_dt(&yblink_toggle, GPIO_INPUT | GPIO_PULL_UP) < 0) {
-        DBG("Error: Failed to configure IO\n");
+        debug("Error: Failed to configure IO\n");
 		return false;
 	}
 
@@ -63,7 +62,7 @@ bool init_buttons(void)
     gpio_pin_interrupt_configure_dt(&yellow_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0 ||
     gpio_pin_interrupt_configure_dt(&green_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0 ||
     gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_EDGE_TO_ACTIVE) < 0) {
-        DBG("Error: Failed to configure button interrupt\n");
+        debug("Error: Failed to configure button interrupt\n");
         return false;
     }
 
@@ -79,7 +78,7 @@ bool init_buttons(void)
     gpio_add_callback(yellow_toggle.port, &yellow_cb_data) < 0 ||
     gpio_add_callback(green_toggle.port, &green_cb_data) < 0 ||
     gpio_add_callback(yblink_toggle.port, &yblink_cb_data) < 0) {
-        DBG("Error: Failed to add button callback(s)\n");
+        debug("Error: Failed to add button callback(s)\n");
         return false;
     }
 
@@ -99,7 +98,7 @@ void interrupt_enable(void)
         gpio_pin_interrupt_configure_dt(&yblink_toggle, GPIO_INT_EDGE_TO_ACTIVE);
     }
 
-    DBG("Interrupts enabled\n");
+    debug("Interrupts enabled\n");
 }
 
 void interrupt_disable(void)
@@ -123,7 +122,7 @@ void manual_isr(void)
         // Save the current color
         cont = color;
         state = Manual;
-        DBG("Manual control\n");
+        debug("Manual control\n");
     // If we are unpausing, restore the saved state
     } else {
         if (k_mutex_lock(&lmux, K_NO_WAIT) == 0) {
@@ -142,7 +141,7 @@ void manual_isr(void)
                     break;
             }
         } else {
-            DBG("Try again. Mutex is busy\n");
+            debug("Try again. Mutex is busy\n");
         }
 
         k_mutex_unlock(&lmux);
@@ -157,12 +156,12 @@ void red_toggle_isr(void)
     if (paused) {
         if (state == Blink) {
             state = Manual;
-            DBG("Toggling YELLOW BLINK OFF\n");
+            debug("Toggling YELLOW BLINK OFF\n");
         }
 
         // Send signal to red task
         k_condvar_signal(&rsig);
-        DBG("Toggling RED\n");
+        debug("Toggling RED\n");
     }
 }
 
@@ -173,12 +172,12 @@ void yellow_toggle_isr(void)
     if (paused) {
         if (state == Blink) {
             state = Manual;
-            DBG("Toggling YELLOW BLINK OFF\n");
+            debug("Toggling YELLOW BLINK OFF\n");
         }
 
         // Send signal to yellow task
         k_condvar_signal(&ysig);
-        DBG("Toggling YELLOW\n");
+        debug("Toggling YELLOW\n");
     }
 
 }
@@ -190,12 +189,12 @@ void green_toggle_isr(void)
     if (paused) {
         if (state == Blink) {
             state = Manual;
-            DBG("Toggling YELLOW BLINK OFF\n");
+            debug("Toggling YELLOW BLINK OFF\n");
         }
         
         // Send signal to green task
         k_condvar_signal(&gsig);
-        DBG("Toggling GREEN\n");
+        debug("Toggling GREEN\n");
     }
 }
 
@@ -207,10 +206,10 @@ void yblink_toggle_isr(void)
         // Toggle blinking yellow mode
         if (state != Blink) {
             state = Blink;
-            DBG("Toggling YELLOW BLINK ON\n");
+            debug("Toggling YELLOW BLINK ON\n");
         } else {
             state = Manual;
-            DBG("Toggling YELLOW BLINK OFF\n");
+            debug("Toggling YELLOW BLINK OFF\n");
         }
     }
 
