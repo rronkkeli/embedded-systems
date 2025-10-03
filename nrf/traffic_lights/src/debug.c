@@ -50,6 +50,59 @@ struct debug_fifo_t {
     struct debug_t dbg;
 };
 
+// Initialize statistics
+struct statistics statistics = {
+    .btns = {
+        .button_manual_toggle = 0,
+        .button_red_toggle = 0,
+        .button_yellow_toggle = 0,
+        .button_green_toggle = 0,
+        .button_yellow_blink_toggle = 0
+    },
+
+    .leds = {
+        .red.toggled = 0,
+        .blue.toggled = 0
+    },
+
+    .threads = {
+        .main = {
+            .typical_signal_wait_time_ms = 0,
+            .typical_runtime_ns = 0
+        },
+
+        .red = {
+            .typical_signal_wait_time_ms = 0,
+            .typical_runtime_ns = 0
+        },
+
+        .yellow = {
+            .typical_signal_wait_time_ms = 0,
+            .typical_runtime_ns = 0
+        },
+
+        .green = {
+            .typical_signal_wait_time_ms = 0,
+            .typical_runtime_ns = 0
+        },
+        
+        .uart = {
+            .typical_signal_wait_time_ms = 0,
+            .typical_runtime_ns = 0
+        },
+        
+        .dispatcher = {
+            .typical_signal_wait_time_ms = 0,
+            .typical_runtime_ns = 0
+        },
+
+        .debug = {
+            .typical_signal_wait_time_ms = 0,
+            .typical_runtime_ns = 0
+        }
+    }
+};
+
 volatile bool print_debug_messages = false;
 
 K_FIFO_DEFINE(debug_fifo);
