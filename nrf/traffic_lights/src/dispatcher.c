@@ -9,6 +9,7 @@
 #include "dispatcher.h"
 #include "mux.h"
 #include "debug.h"
+#include "timeparser.h"
 
 #define STACK_SIZE 512
 // Define command sequence size once to deflect possible human errors from not remembering to change every occurance

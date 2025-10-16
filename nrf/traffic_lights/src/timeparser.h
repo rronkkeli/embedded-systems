@@ -20,8 +20,6 @@
 // Convert OR'd flags into error. Keeps syntax and intent clear.
 #define ERR_TIME(flags) (-(flags))
 
-using namespace std;
-
 int time_parse(char *time);
 
 #endif

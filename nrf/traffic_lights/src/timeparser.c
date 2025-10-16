@@ -1,6 +1,6 @@
-#include <stdlib.h>
-#include <string.h>
-#include "TimeParser.h"
+#include <zephyr/kernel.h>
+#include <ctype.h>
+#include "timeparser.h"
 
 // time format: HHMMSS (6 characters)
 int time_parse(char *time) {
@@ -24,7 +24,7 @@ int time_parse(char *time) {
 	int values[3] = {0, 0, 0};
 
 	for (int i = 0; i < len; i++) {
-		if (!(time[i] > '/') || !(time[i] < ':')) {
+		if (!isdigit(time[i])) {
 			seconds |= FLAG_TIME_SYNTAX;
 			if (i < 2) seconds |= FLAG_TIME_VALUE_HOUR;
 			else if (i < 4) seconds |= FLAG_TIME_VALUE_MINUTE;
@@ -37,13 +37,6 @@ int time_parse(char *time) {
 	}
 	
 	if (seconds != 0) iserr = true;
-
-	// Parse values from time string
-	// values[2] = atoi(time+4); // seconds
-	// time[4] = 0;
-	// values[1] = atoi(time+2); // minutes
-	// time[2] = 0;
-	// values[0] = atoi(time); // hours
 
 	// More than 59 seconds
 	if (values[2] > 59) {
