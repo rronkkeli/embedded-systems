@@ -16,7 +16,8 @@ int time_parse(char *time) {
 	len = strlen(time);
 	// Check for length correctness but do not return yet
 	if (len != 6) {
-		seconds |= FLAG_TIME_LEN;
+		return ERR_TIME(FLAG_TIME_LEN);
+		// seconds |= FLAG_TIME_LEN;
 	}
 
 	// Check that input contains only digits (ASCII characters between 0x2f and 0x3a exclusive)
@@ -29,6 +30,7 @@ int time_parse(char *time) {
 			if (i < 2) seconds |= FLAG_TIME_VALUE_HOUR;
 			else if (i < 4) seconds |= FLAG_TIME_VALUE_MINUTE;
 			else if (i < 6) seconds |= FLAG_TIME_VALUE_SECOND;
+			else break;
 
 		} else if (i < 6) {
 			// Parse the integer and multiply it with ten if it is first
