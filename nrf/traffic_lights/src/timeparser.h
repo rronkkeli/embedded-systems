@@ -3,7 +3,7 @@
 
 // Return codes and flags to signal multiple errors so the user can try to correct all of them
 
-// Return value for correctly parsed time string
+// Return value for correctly parsed time string (Unused)
 #define TIME_OK                   0
 
 // Signals that the parsed time string has incorrect length

@@ -22,6 +22,8 @@ K_FIFO_DEFINE(dispatcher_fifo);
 K_THREAD_DEFINE(uartth, STACK_SIZE, uart_task, NULL, NULL, NULL, 4, 0, 0);
 K_THREAD_DEFINE(dispatchth, STACK_SIZE, dispatcher_task, &color, NULL, NULL, 3, 0, 0);
 
+volatile bool robomode = false;
+
 // Prints the information about usage to the UART shell in command line style
 void print_help(void) {
     printk("\n\nUsage:\n\t[[R | Y | G | O]..INT]..[[T]INT]\tSwitch light in given sequence and loop T times\n\n\tUse D to toggle debug on or off (does not echo)\n\n");
@@ -233,40 +235,57 @@ void uart_task(void *, void *, void *) {
         }
         // Received a character through UART -> handle it
         if (uart_poll_in(uart_dev, &rechar) == 0) {            
-            printk("%c", rechar);
-            if (!paused && state != Manual) {
-                paused = true;
-                state = Manual;
-                cont = color;
-            }
-
-            if (rechar == '\r') {
-                rechar = '\n';
-            }
             
-            // Parse newline aka command end
-            if (rechar == '\n') {
-                printk("\n");
-
-                int timeout = time_parse(command_buf);
-                
-                if (timeout > 0) {
-                    printk("Setting up timer with %i seconds\n", timeout);
-                    k_timer_start(&schedule_timer, K_SECONDS(timeout), K_NO_WAIT);
-                } else {
-                    printk("Invalid input data. Got error %08x\n", timeout);
-                }
-
-                cnt = 0;
-                memset(command_buf, 0, COMSIZ);
-
+            if (rechar == (char)0) {
+                robomode = !robomode;
+                printk("%i\n", robomode);
+                continue;
             } else {
-                command_buf[cnt] = rechar;
-                cnt++;
+                // Do not echo characters when on robo mode
+                if (!robomode) printk("%c", rechar);
+                
+                if (!paused && state != Manual) {
+                    paused = true;
+                    state = Manual;
+                    cont = color;
+                }
+    
+                if (rechar == '\r') {
+                    rechar = '\n';
+                }
+                
+                // Parse newline aka command end
+                if (rechar == '\n') {                        
+                    int timeout = time_parse(command_buf);
+                    
+                    // Print data to robot
+                    if (robomode) {
+                        printk("%i\n", timeout);
+                    }
+                    
+                    // Otherwise schedule task normally
+                    else {
+                        printk("\n");
+                        if (timeout > -1) {
+                            printk("Setting up timer with %i seconds\n", timeout);
+                            k_timer_start(&schedule_timer, K_SECONDS(timeout), K_NO_WAIT);
+                        } else {
+                            printk("Invalid input data. Got error %08x\n", timeout);
+                        }
+                    }
+                    
+                    cnt = 0;
+                    memset(command_buf, 0, COMSIZ);
+    
+                } else {
+                    command_buf[cnt] = rechar;
+                    cnt++;
+                }
             }
-        }
 
-        k_msleep(100);
+        }
+        // Causes problems with robot so uncommented it
+        // k_msleep(100);
     }
 }
                 
