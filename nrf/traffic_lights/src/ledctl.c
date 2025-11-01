@@ -1,9 +1,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/random/random.h>
+#include <zephyr/timing/timing.h>
 
 #include "ledctl.h"
 #include "mux.h"
+#include "debug.h"
 
 // Set transition time between colors
 const uint32_t HOLD_TIME_MS = 1000;
@@ -48,18 +49,34 @@ void set_red(void);
 void set_yellow(void);
 void set_green(void);
 void set_off(void);
+/*
+    Add thread execution time on seq_time variable. If ltime_set becomes 7 during this operation, seq_time is scheduled in
+    debugging.
+*/
+void add_or_send_exec(timing_t, int);
+
+/*
+    Each led task can set a bit in this atomic variable to signal othre led tasks that it has counted its execution time.
+
+    Other ready tasks won't update the seq_time value until last one to update the value clears the flags.
+
+    Value 7 means that all tasks have added their own values.
+*/
+atomic_t ltime_set = 0;
+atomic_t seq_time = 0;
+
 
 bool init_leds(void)
 {
     // Check that on-board leds are ready
     if (!gpio_is_ready_dt(&red_led) || !gpio_is_ready_dt(&green_led)) {
-        printf("Error: LED device(s) not ready\n");
+        debug("Error: LED device(s) not ready");
         return false;
     }
 
     if (gpio_pin_configure_dt(&red_led, GPIO_OUTPUT_ACTIVE) < 0 ||
         gpio_pin_configure_dt(&green_led, GPIO_OUTPUT_ACTIVE) < 0) {
-        printf("Error: Failed to configure LED pins\n");
+        debug("Error: Failed to configure LED pins");
         return false;
     }
 
@@ -68,14 +85,27 @@ bool init_leds(void)
 
 void red(enum State *state, enum Color *color, void *)
 {
+    timing_t start;
     k_sem_give(&threads_ready);
+
     // Loop forever
     while (1) {
+        start = timing_counter_get();
+        
         // Wait for a signal to switch led on and off
+        debug("Waiting for lmux mutex..");
         k_mutex_lock(&lmux, K_FOREVER);
+
+        debug("Done! Waiting for condition variable rsig..");
+
         if (k_condvar_wait(&rsig, &lmux, K_FOREVER) == 0) {
+            debug("Done!");
+
             toggle_led(*state, color, Red);
         }
+
+        add_or_send_exec(start, 0);
+
         k_mutex_unlock(&lmux);
         k_yield();
     }
@@ -83,12 +113,20 @@ void red(enum State *state, enum Color *color, void *)
 
 void yellow(enum State *state, enum Color *color, void *)
 {
+    timing_t start;
     k_sem_give(&threads_ready);    
     // Loop forever
     while (1) {
+        start = timing_counter_get();
+
         // Wait for a signal to switch led on and off
+        debug("Waiting for lmux mutex..");
         k_mutex_lock(&lmux, K_FOREVER);
+
+        debug("Done! Waiting for condition variable ysig..");
+
         if (k_condvar_wait(&ysig, &lmux, K_FOREVER) == 0) {
+            debug("Done!");
 
             if (*state == Blink) {
                 while (*state == Blink) {
@@ -101,6 +139,8 @@ void yellow(enum State *state, enum Color *color, void *)
                 toggle_led(*state, color, Yellow);
             }
         }
+
+        add_or_send_exec(start, 1);
         k_mutex_unlock(&lmux);
         k_yield();
     }
@@ -108,14 +148,25 @@ void yellow(enum State *state, enum Color *color, void *)
 
 void green(enum State *state, enum Color *color, void *)
 {
+    timing_t start;
     k_sem_give(&threads_ready);
     // Loop forever
     while (1) {
+        start = timing_counter_get();
+        
         // Wait for a signal to switch led on and off
+        debug("Waiting for lmux mutex..");
         k_mutex_lock(&lmux, K_FOREVER);
+        
+        debug("Done! Waiting for condition variable gsig..");
+        
         if (k_condvar_wait(&gsig, &lmux, K_FOREVER) == 0) {
+            debug("Done!");
+
             toggle_led(*state, color, Green);
         }
+
+        add_or_send_exec(start, 2);
         k_mutex_unlock(&lmux);
         k_yield();
     }
@@ -141,7 +192,7 @@ void toggle_led(enum State state, enum Color *from_color, enum Color to_color) {
             break;
         default:
             set_color = &set_off;
-            printk("Thread was killed\n");
+            debug("Thread was killed");
             k_oops();
     }
 
@@ -192,4 +243,16 @@ void set_off(void)
     gpio_pin_set_dt(&red_led, 0);
     gpio_pin_set_dt(&green_led, 0);
     color = Off;
+}
+
+void add_or_send_exec(timing_t time, int bit) {
+    if (!atomic_test_and_set_bit(&ltime_set, bit)) {
+        atomic_val_t stop = (atomic_val_t)timing_cycles_to_ns(timing_counter_get() - time);
+        atomic_add(&seq_time, stop);
+        debug("Thread time: %d ns", stop);
+
+        if (atomic_cas(&ltime_set, 7, 0)) {
+            debug("Sequence execution time: %d ns", atomic_clear(&seq_time));
+        }
+    }
 }

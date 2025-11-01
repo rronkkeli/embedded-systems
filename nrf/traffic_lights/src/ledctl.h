@@ -15,8 +15,11 @@ extern volatile enum State state;
 extern volatile enum Color cont;
 extern volatile enum Color color;
 
+// Red thread
 extern const k_tid_t redth;
+// Yellow thread
 extern const k_tid_t yellowth;
+// Green thread
 extern const k_tid_t greenth;
 
 bool init_leds(void);

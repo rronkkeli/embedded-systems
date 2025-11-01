@@ -1,13 +1,14 @@
 /* Uart task waits for data from the UART port and passes*/
 
-#include <stdio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/timing/timing.h>
 
 #include "ledctl.h"
 #include "dispatcher.h"
 #include "mux.h"
+#include "debug.h"
 
 #define STACK_SIZE 512
 // Define command sequence size once to deflect possible human errors from not remembering to change every occurance
@@ -22,7 +23,7 @@ K_THREAD_DEFINE(dispatchth, STACK_SIZE, dispatcher_task, &color, NULL, NULL, 3, 
 
 // Prints the information about usage to the UART shell in command line style
 void print_help(void) {
-    printk("\n\nUsage:\n\t[[R | Y | G | O]..INT]..[[T]INT]\tSwitch light in given sequence and loop T times\n\n");
+    printk("\n\nUsage:\n\t[[R | Y | G | O]..INT]..[[T]INT]\tSwitch light in given sequence and loop T times\n\n\tUse D to toggle debug on or off (does not echo)\n\n");
 };
 
 struct led_control_t {
@@ -41,21 +42,18 @@ bool init_uart(void) {
     if (device_is_ready(uart_dev)) {
         return true;
     }
-    printk("UART initialization failed\n");
+    debug("UART initialization failed");
     return false;
 }
 
 // Helper function to push hold time buffer contents to hold time data array
 void push_ht(uint16_t *ht_dat, uint16_t *ht, int *offset, int *len, bool *pd) {
-    // printk("Called push_ht\n");
     // Update each corresponding hold time of the sequence
     uint16_t holdfor = *ht;
 
-    // printk("holdfor: %dms\n", holdfor);
 
     while (*len > 0) {
         int ix = *offset;
-        // printk("Index of hold times: %d\n", ix);
         ht_dat[ix] = holdfor;
         *offset += 1; // One command handled -> increment the offset
         *len -= 1; // ..and decrement length
@@ -66,7 +64,7 @@ void push_ht(uint16_t *ht_dat, uint16_t *ht, int *offset, int *len, bool *pd) {
 }
 
 void uart_task(void *, void *, void *) {
-    printk("Started uart task\n");
+    debug("Started uart task");
     // Holds the received single character
     char rechar = 0;
     // Holds the count of received characters from UART and also is the index and seqnt counts the commands in sequence
@@ -91,7 +89,7 @@ void uart_task(void *, void *, void *) {
     while (true) {
         if (uart_print) {
             uart_print = false;
-            printk("Waiting for UART\n");
+            debug("Waiting for UART");
         }
         // Received a character through UART -> handle it
         if (uart_poll_in(uart_dev, &rechar) == 0) {
@@ -102,6 +100,12 @@ void uart_task(void *, void *, void *) {
             // Example:
             // `RYG500R200G500Y1000O` Changes colors Red, Yellow and Green in sequence, holding each on for 500ms.
             // Then it holds Red for 200ms, Green for 500ms, Yellow for 1s and finally turns leds off.
+
+            // Toggle debug messages on and off but do not print anything.
+            if (rechar == 'D') {
+                print_debug_messages = !print_debug_messages;
+                continue;
+            }
             
             printk("%c", rechar);
             if (!paused && state != Manual) {
@@ -119,12 +123,12 @@ void uart_task(void *, void *, void *) {
                 printk("\n");
                 push_ht(ht_buf, &seq_time_buf, &cnt, &seqnt, &parsing_digits);
                 
-                printk("Received: %s\n", command_buf);
+                debug("Received: %s", command_buf);
                 // Allocate memory for fifo use
                 struct fifo_data_t *data = k_malloc(sizeof(struct fifo_data_t));
                 
                 if (data == NULL) {
-                    printk("Memory allocation error.\n");
+                    debug("Memory allocation error.");
                     return;
                 }
                 
@@ -180,7 +184,7 @@ void uart_task(void *, void *, void *) {
                     }
 
                     if (expect_loop) {
-                        printk("\nYou cannot define T multiple times!\n");
+                        debug("\nYou cannot define T multiple times!");
                     } else {
                         expect_loop = true;
                         loop = 0;
@@ -211,8 +215,11 @@ void uart_task(void *, void *, void *) {
                 
 void dispatcher_task(enum Color *curcol, void *, void *) {
     while (true) {
-        printk("Waiting for fifo data\n");
+        debug("Waiting for fifo data");
         struct fifo_data_t *rec_data = k_fifo_get(&dispatcher_fifo, K_FOREVER);
+
+        // Begin counting
+        timing_t start = timing_counter_get();
 
         // Loop through the sequence
         for (int l = 0; l < rec_data->ledctl.loop; l++) {
@@ -226,15 +233,15 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
                 switch (rec_data->ledctl.colors[i]) {
                     case 'R':
                         ledsig = &rsig;
-                        printk("Switched led to Red\n");
+                        debug("Switched led to Red");
                         break;
                     case 'Y':
                         ledsig = &ysig;
-                        printk("Switched led to Yellow\n");
+                        debug("Switched led to Yellow");
                         break;
                     case 'G':
                         ledsig = &gsig;
-                        printk("Switched led to Green\n");
+                        debug("Switched led to Green");
                         break;
                     case 'O':
                         switch (*curcol) {
@@ -249,11 +256,11 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
                                 break;
                             default:
                                 ledsig = NULL;
-                                printk("Can't turn led off if it is already off.\n");
+                                debug("Can't turn led off if it is already off.");
                                 break;
                         }
     
-                        printk("Switched led to Off\n");
+                        debug("Switched led to Off");
                         break;
                     default:
                         k_oops();
@@ -261,7 +268,7 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
                     
                     // Send the signal if it was set and wait for a generous amount of time for a answer.
                     if (ledsig != NULL) {
-                        printk("Waiting for lock to release\n");
+                        debug("Waiting for lock to release");
                         if (k_mutex_lock(&lmux, K_MSEC(5000)) == 0) {
                              k_condvar_signal(ledsig);
                             // Wait for minimum hold time to pass before continuing
@@ -269,11 +276,11 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
                                 // No reason to wait here if we only toggle one color because it holds
                                 if (rec_data->ledctl.seq_len > 1) k_msleep(ht->time);
                             } else {
-                                printk("Waiting time expired!\n");
+                                debug("Waiting time expired!");
                             }
     
                         } else {
-                            printk("Mutex timed out\n");
+                            debug("Mutex timed out");
                         }
     
                         k_mutex_unlock(&lmux);
@@ -283,7 +290,7 @@ void dispatcher_task(enum Color *curcol, void *, void *) {
             }
         }
 
-        printk("Dispatcher done\n");
+        debug("Dispatcher done! Execution time: %llu ns", timing_cycles_to_ns(timing_counter_get() - start));
 
         k_free(rec_data);
     }
